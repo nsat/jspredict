@@ -1,0 +1,9 @@
+bower_components/
+node_modules/
+.npm/
+build/
+test
+*~
+.versions
+*#
+.DS_Store
