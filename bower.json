@@ -1,0 +1,38 @@
+{
+  "name": "jspredict",
+  "main": "jspredict.js",
+  "version": "1.0.0",
+  "authors": [
+    "Roshan Jobanputra <roshan@spire.com>"
+  ],
+  "description": "javascript port of predict open-source satellite tracking library",
+  "keywords": [
+    "satellite",
+    "orbit",
+    "tle",
+    "qth",
+    "predict",
+    "space",
+    "sgp4",
+    "norad",
+    "geostationary",
+    "leo",
+    "azimuth",
+    "elevation",
+    "spacecraft",
+    "spire"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/nsat/jspredict",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "satellite.js": "~1.2.0",
+    "moment": "~2.10.6"
+  }
+}
