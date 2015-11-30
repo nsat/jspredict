@@ -74,6 +74,8 @@
   m_moment = m_moment || moment;
 
   var xkmper = 6.378137E3; // earth radius (km) wgs84
+  var astro_unit = 1.49597870691E8; // Astronomical unit - km (IAU 76)
+  var solar_radius = 6.96000E5; // solar radius - km (IAU 76)
   var deg2rad = Math.PI / 180;
   var ms2day = 1000 * 60 * 60 * 24; // milliseconds to day
   var max_iterations = 250;
@@ -163,13 +165,18 @@
       }
       var geo = satellite.eciToGeodetic(eci.position, gmst);
 
+      var solar_vector = this._calculateSolarPosition(start.valueOf());
+      var eclipse = this._satEclipsed(eci.position, solar_vector);
+
       var track = {
         eci: eci,
         gmst: gmst,
         latitude: geo.latitude / deg2rad,
         longitude: this._boundLongitude(geo.longitude / deg2rad),
         altitude: geo.height,
-        footprint: 12756.33 * Math.acos(xkmper / (xkmper + geo.height))
+        footprint: 12756.33 * Math.acos(xkmper / (xkmper + geo.height)),
+        sunlit: !eclipse.eclipsed,
+        eclipseDepth: eclipse.depth / deg2rad
       }
 
       // If we have a groundstation let's get those additional observe parameters
@@ -381,6 +388,85 @@
         longitude -= 360;
       }
       return longitude
+    },
+
+    _satEclipsed: function(pos, sol) {
+      var sd_earth = Math.asin(xkmper / this._magnitude(pos));
+      var rho = this._vecSub(sol, pos);
+      var sd_sun = Math.asin(solar_radius / rho.w);
+      var earth = this._scalarMultiply(-1, pos);
+      var delta = this._angle(sol, earth);
+
+      var eclipseDepth = sd_earth - sd_sun - delta;
+      var eclipse;
+      if (sd_earth < sd_sun) {
+        eclipse = false;
+      } else if (eclipseDepth >= 0) {
+        eclipse = true;
+      } else {
+        eclipse = false;
+      }
+      return {
+        depth: eclipseDepth,
+        eclipsed: eclipse
+      }
+    },
+
+    _calculateSolarPosition: function(start) {
+      var time = start / ms2day + 2444238.5; // jul_utc
+
+      var mjd = time - 2415020.0;
+      var year = 1900 + mjd / 365.25;
+      var T = (mjd + this._deltaET(year) / (ms2day / 1000)) / 36525.0;
+      var M = deg2rad * ((358.47583 + ((35999.04975 * T) % 360) - (0.000150 + 0.0000033 * T) * Math.pow(T, 2)) % 360);
+      var L = deg2rad * ((279.69668 + ((36000.76892 * T) % 360) + 0.0003025 * Math.pow(T, 2)) % 360);
+      var e = 0.01675104 - (0.0000418 + 0.000000126 * T) * T;
+      var C = deg2rad * ((1.919460 - (0.004789 + 0.000014 * T) * T) * Math.sin(M) + (0.020094 - 0.000100 * T) * Math.sin(2 * M) + 0.000293 * Math.sin(3 * M));
+      var O = deg2rad * ((259.18 - 1934.142 * T) % 360.0);
+      var Lsa = (L + C - deg2rad * (0.00569 - 0.00479 * Math.sin(O))) % (2 * Math.PI);
+      var nu = (M + C) % (2 * Math.PI);
+      var R = 1.0000002 * (1 - Math.pow(e, 2)) / (1 + e * Math.cos(nu));
+      var eps = deg2rad * (23.452294 - (0.0130125 + (0.00000164 - 0.000000503 * T) * T) * T + 0.00256 * Math.cos(O));
+      var R = astro_unit * R;
+
+      return {
+        x: R * Math.cos(Lsa),
+        y: R * Math.sin(Lsa) * Math.cos(eps),
+        z: R * Math.sin(Lsa) * Math.sin(eps),
+        w: R
+      }
+    },
+
+    _deltaET: function(year) {
+      return 26.465 + 0.747622 * (year - 1950) + 1.886913 * Math.sin((2 * Math.PI) * (year - 1975) / 33)
+    },
+
+    _vecSub: function(v1, v2) {
+      var vec = {
+        x: v1.x - v2.x,
+        y: v1.y - v2.y,
+        z: v1.z - v2.z
+      }
+      vec.w = this._magnitude(vec);
+      return vec
+    },
+
+    _scalarMultiply: function(k, v) {
+      return {
+        x: k * v.x,
+        y: k * v.y,
+        z: k * v.z,
+        w: v.w ? Math.abs(k) * v.w : undefined
+      }
+    },
+
+    _magnitude: function(v) {
+      return Math.sqrt(Math.pow(v.x, 2) + Math.pow(v.y, 2) + Math.pow(v.z, 2))
+    },
+
+    _angle: function(v1, v2) {
+      var dot = (v1.x * v2.x + v1.y * v2.y + v1.z * v2.z);
+      return Math.acos(dot / (this._magnitude(v1) * this._magnitude(v2)))
     }
   }
 
