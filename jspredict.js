@@ -167,7 +167,7 @@
         eci: eci,
         gmst: gmst,
         latitude: geo.latitude / deg2rad,
-        longitude: geo.longitude / deg2rad,
+        longitude: this._boundLongitude(geo.longitude / deg2rad),
         altitude: geo.height,
         footprint: 12756.33 * Math.acos(xkmper / (xkmper + geo.height))
       }
@@ -371,6 +371,16 @@
         date.getUTCMinutes(),
         date.getUTCSeconds()
       );
+    },
+
+    _boundLongitude: function(longitude) {
+      while (longitude < -180) {
+        longitude += 360;
+      }
+      while (longitude > 180) {
+        longitude -= 360;
+      }
+      return longitude
     }
   }
 
