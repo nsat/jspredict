@@ -1,6 +1,6 @@
 Package.describe({
   summary: "javascript port of predict open-source satellite tracking library",
-  version: "1.0.0",
+  version: "1.0.1",
   name: "rosh93:jspredict",
   git: "https://github.com/nsat/jspredict"
 });
