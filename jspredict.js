@@ -131,7 +131,7 @@
         minElevation = defaultMinElevation;
       }
 	  
-	  if (!maxTransits) {
+      if (!maxTransits) {
         maxTransits = max_iterations;
       }
 
@@ -145,7 +145,7 @@
       var transits = [];
       var nextTransit;
       var iterations = 0;
-	  var transitsCounted = 0;
+      var transitsCounted = 0;
 
       while (iterations < max_iterations && transitsCounted < maxTransits) {
         transit = this._quickPredict(satrec, qth, time);
@@ -157,7 +157,7 @@
         }
         if (transit.end > start.valueOf() && transit.maxElevation > minElevation) {
           transits.push(transit);
-		  transitsCounted += 1;
+          transitsCounted += 1;
         }
         time = transit.end + 60 * 1000;
         iterations += 1;
@@ -165,7 +165,7 @@
 
       return transits
     },
-	
+
     _observe: function(satrec, qth, start) {
       start = m_moment(start);
       var eci = this._eci(satrec, start);
