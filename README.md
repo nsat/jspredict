@@ -2,6 +2,8 @@
 
 A Javascript port of the popular `predict` satellite tracking library.
 
+Version 1.1
+
 ### Based on:
 - PREDICT: http://www.qsl.net/kd2bd/predict.html
 - PyPredict: https://github.com/nsat/pypredict
@@ -58,7 +60,7 @@ observe(tle 'required', qth 'optional', time 'optional')
 
 observes(tle 'required', qth 'optional', start 'optional', end 'required', interval 'optional')
 
-transits(tle 'required', qth 'required', start 'optional', end 'required', minElevation 'optional')
+transits(tle 'required', qth 'required', start 'optional', end 'required', minElevation 'optional', maxTransits 'optional')
 ```
 
 ## Examples
@@ -111,12 +113,12 @@ transits(tle 'required', qth 'required', start 'optional', end 'required', minEl
   doppler: 1.0000075435881037 }
 ```
 
-### Get Transits for Satellite and Observer
+### Get Transits for Satellite and Observer (minimum elevation of 2 degrees; obtain a maximum of 4 transits)
 
 ```js
 > var tle = '0 LEMUR-2 JEROEN\n1 40934U 15052E   15306.10048119  .00001740  00000-0  15647-3 0  9990\n2 40934   6.0033 141.2190 0010344 133.6141 226.4604 14.76056230  5130';
 > var qth = [15, 130, .1];
-> jspredict.transits(tle, qth, 1446516345242, 1446545135046);
+> jspredict.transits(tle, qth, 1446516345242, 1446545135046, 2, 4);
 [ { start: 1446519623929.2715,
     end: 1446520436786.1265,
     maxElevation: 26.592307317708126,

@@ -1,6 +1,10 @@
-// jspredict v1.0
+// jspredict v1.1
 // Author: Roshan Jobanputra
 // https://github.com/nsat/jspredict
+
+// Changelog:
+// v1.1 (jotenko)	- Added parameter 'maxTransits' to function 'transits' (allows the user to define a maximum number of transits to be calculated, for performance management)
+// v1.0 (nsat)		- First release
 
 // Copyright (c) 2015, Spire Global Inc
 // All rights reserved.
@@ -119,12 +123,16 @@
       return observes
     },
 
-    transits: function(tle, qth, start, end, minElevation) {
+    transits: function(tle, qth, start, end, minElevation, maxTransits) {
       start = m_moment(start);
       end = m_moment(end);
 
       if (!minElevation) {
         minElevation = defaultMinElevation;
+      }
+	  
+      if (!maxTransits) {
+        maxTransits = max_iterations;
       }
 
       var tles = tle.split('\n');
@@ -138,7 +146,7 @@
       var nextTransit;
       var iterations = 0;
 
-      while (iterations < max_iterations) {
+      while (iterations < max_iterations && transits.length < maxTransits) {
         transit = this._quickPredict(satrec, qth, time);
         if (!transit) {
           break;
