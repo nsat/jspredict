@@ -1,6 +1,7 @@
 # JsPredict
 
 A Javascript port of the popular `predict` satellite tracking library.
+
 Version 1.1
 
 ### Based on:
