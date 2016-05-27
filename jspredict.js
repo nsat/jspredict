@@ -1,10 +1,10 @@
-// jspredict v1.1
+// jspredict v1.0.2
 // Author: Roshan Jobanputra
 // https://github.com/nsat/jspredict
 
 // Changelog:
-// v1.1 (jotenko)	- Added parameter 'maxTransits' to function 'transits' (allows the user to define a maximum number of transits to be calculated, for performance management)
-// v1.0 (nsat)		- First release
+// v1.0.2 (jotenko)	- Added parameter 'maxTransits' to function 'transits' (allows the user to define a maximum number of transits to be calculated, for performance management)
+// v1.0.1 (nsat)		- First release
 
 // Copyright (c) 2015, Spire Global Inc
 // All rights reserved.
@@ -130,7 +130,7 @@
       if (!minElevation) {
         minElevation = defaultMinElevation;
       }
-	  
+
       if (!maxTransits) {
         maxTransits = max_iterations;
       }
