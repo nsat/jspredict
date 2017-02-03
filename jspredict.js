@@ -1,8 +1,9 @@
-// jspredict v1.0.2
+// jspredict v1.0.3
 // Author: Roshan Jobanputra
 // https://github.com/nsat/jspredict
 
 // Changelog:
+// v1.0.3 (rosh93)  - If we cant approximate our aos within max_iterations, return null and dont attempt to return a bad transit object. Fix a few jslint warnings
 // v1.0.2 (jotenko)	- Added parameter 'maxTransits' to function 'transits' (allows the user to define a maximum number of transits to be calculated, for performance management)
 // v1.0.1 (nsat)		- First release
 
@@ -220,6 +221,9 @@
       }
 
       var daynum = this._findAOS(satrec, qth, start);
+      if (!daynum) {
+        return null;
+      }
       transit.start = daynum;
 
       var observed = this._observe(satrec, qth, daynum);
@@ -244,7 +248,7 @@
         minAz = Math.min(minAz, observed.azimuth);
         iterations += 1;
       }
-      if (lastel != 0) {
+      if (lastel !== 0) {
         daynum = this._findLOS(satrec, qth, daynum);
       }
 
@@ -271,7 +275,7 @@
     _aosHappens: function(satrec, qth) {
       var lin, sma, apogee;
       var meanmo = satrec.no * 24 * 60 / (2 * Math.PI); // convert rad/min to rev/day
-      if (meanmo == 0) {
+      if (meanmo === 0) {
         return false
       } else {
         lin = satrec.inclo / deg2rad;
@@ -327,7 +331,7 @@
         iterations += 1;
       }
       iterations = 0;
-      while (aostime == 0 && iterations < max_iterations) {
+      while (aostime === 0 && iterations < max_iterations) {
         if (!observed) {
           break;
         }
@@ -339,6 +343,9 @@
         }
         iterations += 1;
       }
+      if (aostime === 0) {
+        return null;
+      }
       return aostime
     },
 
@@ -348,7 +355,7 @@
       var lostime = 0;
       var iterations = 0;
 
-      while (lostime == 0 && iterations < max_iterations) {
+      while (lostime === 0 && iterations < max_iterations) {
         if (Math.abs(observed.elevation) < 0.50) { // this was 0.03 but switched to 0.50 for performance
           lostime = current;
         } else {
