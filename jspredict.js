@@ -1,8 +1,9 @@
-// jspredict v1.0.2
+// jspredict v1.0.3
 // Author: Roshan Jobanputra
 // https://github.com/nsat/jspredict
 
 // Changelog:
+// v1.0.3 (rosh93)  - If we cant approximate our aos within max_iterations, return null and dont attempt to return a bad transit object. Fix a few jslint warnings
 // v1.0.2 (jotenko)	- Added parameter 'maxTransits' to function 'transits' (allows the user to define a maximum number of transits to be calculated, for performance management)
 // v1.0.1 (nsat)		- First release
 
