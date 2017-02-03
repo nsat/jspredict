@@ -2,8 +2,6 @@
 
 A Javascript port of the popular `predict` satellite tracking library.
 
-Version 1.0.2
-
 ### Based on:
 - PREDICT: http://www.qsl.net/kd2bd/predict.html
 - PyPredict: https://github.com/nsat/pypredict
