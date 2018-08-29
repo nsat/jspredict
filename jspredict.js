@@ -69,7 +69,7 @@
 
   // Npm
   if (typeof require !== 'undefined') {
-    var satellite = require('satellite.js').satellite;
+    var satellite = require('satellite.js');
     m_moment = require('moment');
   }
   // Meteor
