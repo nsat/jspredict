@@ -385,7 +385,7 @@
 
     _gmst: function(date) {
       date = new Date(date.valueOf());
-      return satellite.gstimeFromDate(
+      return satellite.gstime(
         date.getUTCFullYear(),
         date.getUTCMonth() + 1, // months range 1-12
         date.getUTCDate(),
