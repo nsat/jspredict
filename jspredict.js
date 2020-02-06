@@ -69,7 +69,7 @@
 
   // Npm
   if (typeof require !== 'undefined') {
-    var satellite = require('satellite.js').satellite;
+    var satellite = require('satellite.js');
     m_moment = require('moment');
   }
   // Meteor
@@ -385,7 +385,7 @@
 
     _gmst: function(date) {
       date = new Date(date.valueOf());
-      return satellite.gstimeFromDate(
+      return satellite.gstime(
         date.getUTCFullYear(),
         date.getUTCMonth() + 1, // months range 1-12
         date.getUTCDate(),
