@@ -3,6 +3,7 @@
 // https://github.com/nsat/jspredict
 
 // Changelog:
+// v1.2.0 (rachaelacollins) - Add transitSegment()
 // v1.1.1 (cantino) - Update satellite.js dependency
 // v1.0.3 (rosh93) - If we cant approximate our aos within max_iterations, return null and dont attempt to return a bad transit object. Fix a few jslint warnings
 // v1.0.2 (jotenko) - Added parameter 'maxTransits' to function 'transits' (allows the user to define a maximum number of transits to be calculated, for performance management)
@@ -57,7 +58,8 @@
   // observes(tle 'required', qth 'optional', start 'optional', end 'required', interval 'optional')
   //
   // transits(tle 'required', qth 'required', start 'optional', end 'required', minElevation 'optional')
-  //   transit
+  //
+  // transitSegment(tle 'required', qth 'required', start 'required', end 'required')
 
 (function (global, factory) {
     typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
@@ -166,6 +168,19 @@
       return transits
     },
 
+    transitSegment: function(tle, qth, start, end) {
+      start = m_moment(start);
+      end = m_moment(end);
+
+      var tles = tle.split('\n');
+      var satrec = satellite.twoline2satrec(tles[1], tles[2]);
+      if (this._badSat(satrec, qth, start)) {
+        return [];
+      }
+
+      return this._quickPredict(satrec, qth, start.valueOf(), end.valueOf());
+    },
+
     _observe: function(satrec, qth, start) {
       start = m_moment(start);
       var eci = this._eci(satrec, start);
@@ -212,7 +227,7 @@
       return track
     },
 
-    _quickPredict: function(satrec, qth, start) {
+    _quickPredict: function(satrec, qth, start, end) {
       var transit = {};
       var lastel = 0;
       var iterations = 0;
@@ -236,7 +251,7 @@
 
       var maxEl = 0, apexAz = 0, minAz = 360, maxAz = 0;
 
-      while (iel >= 0 && iterations < max_iterations) {
+      while (iel >= 0 && iterations < max_iterations && (!end || daynum < end)) {
         lastel = iel;
         daynum = daynum + ms2day * Math.cos((observed.elevation-1.0)*deg2rad)*Math.sqrt(observed.altitude)/25000.0;
         observed = this._observe(satrec, qth, daynum);
