@@ -151,11 +151,14 @@
       var iterations = 0;
 
       while (iterations < max_iterations && transits.length < maxTransits) {
-        transit = this._quickPredict(satrec, qth, time);
+        let transit = this._quickPredict(satrec, qth, time);
         if (!transit) {
           break;
         }
         if (transit.end > end.valueOf()) {
+          break;
+        }
+        if (transit.end === 0) { // Geostationary
           break;
         }
         if (transit.end > start.valueOf() && transit.maxElevation > minElevation) {
