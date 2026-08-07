@@ -7,37 +7,13 @@ A Javascript port of the popular `predict` satellite tracking library.
 - PyPredict: https://github.com/nsat/pypredict
 - Python-SGP4: https://github.com/brandon-rhodes/python-sgp4
 
-### Depends on:
-- Satellite.js: https://github.com/shashwatak/satellite-js
-- Moment.js: https://github.com/moment/moment
-
 ## Installation
 
-JsPredict has been pushed to the `NPM`, `Meteor` (Atmosphere), and `Bower` package registries, and can also be used by including the src file directly.
+JsPredict v2.x is hosted on GitHub Package and can be installed via the following command:
 
-### NPM
-
+```shell
+npm install jspredict 
 ```
-npm install jspredict
-```
-
-### Meteor
-
-```
-meteor add rosh93:jspredict
-```
-
-### Bower
-
-```
-bower install jspredict
-```
-
-### Manual Include
-
-Download and include `moment.js`: http://momentjs.com/
-
-Include both `satellite.js` and `jspredict.js` to get `satellite` and `jspredict` available on the global `window` namespace.
 
 ## API
 
