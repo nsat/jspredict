@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 # Mac Stuff
 .DS_Store
+pypredict/
+_pypredict/
+compare/

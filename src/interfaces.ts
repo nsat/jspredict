@@ -1,4 +1,4 @@
-import { EcfVec3, EciVec3 } from "satellite.js"
+import { EcfVec3, EciVec3, GeodeticLocation } from "satellite.js"
 import { Radians, Degrees, Kilometers, KilometersPerHour, KilometersPerSecond } from "./types.ts"
 
 /** Position parameters */
@@ -9,14 +9,8 @@ export interface Position {
   /** Position in Earth-Centered Earth-Fixed (ECEF) coordinates measured in kilometers */
   ecef?: EcfVec3<Kilometers>
 
-  /** Latitudinal position in degress */
-  latitude?: Degrees
-
-  /** Longitudinal position in degrees */
-  longitude?: Degrees
-
-  /** Position altitude in kilometers (km) */
-  altitude?: Kilometers
+  /** Position in Geodetic coordinats measured in radians and kilometers */
+  geodetic?: GeodeticLocation
 }
 
 /** Velocity parameters */
@@ -34,16 +28,16 @@ export interface Orbit {
   revolutionCount: number
 
   /** The current position of the satellite in its orbit relative to its perigee/ascending node, measured in degrees */
-  phase?: Degrees
+  phase?: Radians | Degrees
   
-  /** Satellite velocity relative to the center of the Earth in kilometers per hour (kph) */
-  velocity?: KilometersPerHour
+  /** Satellite velocity relative to the center of the Earth in kilometers per second */
+  velocity?: KilometersPerSecond
 }
 
 /**
  * Satellite ground track parameters
  */
-export interface SatelliteGroundTrack {
+export interface SatelliteObservation {
   /** Satellite international designator */
   id: string
 
@@ -90,37 +84,32 @@ export interface SatelliteGroundTrack {
    * The angle between the satellite's orbital plane and the vector pointing directly to the Sun, measured in degrees. 
    * Used to determine thermal exposure and eclipse duration.
    */
-  betaAngle?: Degrees
+  betaAngle?: Degrees | Radians
   
   /**
    * The fraction of the Sun’s disc obscured by the Earth as seen from a satellite.
    * 0 = fully lit, 1 = umbra, values between 0 and 1 indicate the fraction of the Sun covered by Earth.
    */
   eclipseFactor?: number
-}
 
-/**
- * Satellite ground observation parameters
- * */
-export interface SatelliteGroundTrackObservation extends SatelliteGroundTrack {
   /** Satellite observer's position */
-  observerPosition: Position
+  observerPosition?: Position
 
   /** The compass heading to the satellite from the observer's ground location in degrees */
-  azimuth: Degrees;
+  azimuth?: Degrees | Radians
 
   /** The angle of the satellite above (or below) the observer's horizon in degrees. */
-  elevation: Degrees;
+  elevation?: Degrees | Radians
 
   /** The direct line-of-sight distance from the observer to the satellite, measured in kilometers. */
-  slantRange: Kilometers;
+  slantRange?: Kilometers
 
   /** Satellite frequency shift (i.e doppler factor) relative to observer. */
-  dopplerFactor: number;
+  dopplerFactor?: number
 
   /** Indicates if the satellite is optically visible at the observer's location */
-  visibility: string 
+  visibility?: string 
 
   /** Indicates if the satellite is above the observer's horizon */
-  hasAos: boolean
+  hasAos?: boolean
 }

@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     lib: {
       // Defines the entry point of your module
-      entry: 'src/common.ts',
+      entry: 'src/index.ts',
       name: 'JsPredict',
       formats: ['es'],
       fileName: 'jspredict',

@@ -28,54 +28,64 @@
 // OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-import { SatelliteGroundTrack, SatelliteGroundTrackObservation, Position } from "./interfaces";
-import { astronomicalUnit, deg2rad } from "./constants";
-import { TwoLineElement, DateTimeTypes, OrbitMeanElementsMessage, Degrees } from "./types";
-import { footprintRadius, greenwichMeanSiderealTime, parseDateTime, parseSatelliteElements, predictedRevolutionCount } from "./utils";
+import { SatelliteObservation, Position } from "./interfaces";
+import { astronomicalUnit, deg2rad, rad2deg } from "./constants";
+import { TwoLineElement, DateTimeTypes, OrbitMeanElementsMessage, Degrees, Radians } from "./types";
 import {
-  degreesLat,
-  degreesLong,
+  footprintDiameter,
+  greenwichMeanSiderealTime,
+  parseDateTime,
+  parseSatelliteElements,
+  predictedRevolutionCount,
+  inferPosition,
+  inferVelocity,
+  vectorMagnitude,
+  convertGeodeticToDegrees,
+  isGeostationary,
+  betaAngle
+} from "./utils";
+import {
   dopplerFactor,
   ecfToLookAngles,
-  eciToEcf,
-  eciToGeodetic,
-  geodeticToEcf,
   jday,
+  Kilometer,
   propagate,
   radiansToDegrees,
-  radiansLat,
-  radiansLong,
   SatRecError,
   shadowFraction,
   sunPos,
 } from "satellite.js";
 
+/** Set the angular units for the inputs and outputs */
+export enum AngularUnits {
+  Degrees = 'DEGREES',
+  Radians = 'RADIANS'
+}
+
 /**
- * Calculates the position, velocity, and ground track location of a satellite 
- * at a given time.
+ * Calculates satellite observation parameters such as postion, velocity, and 
+ * observer look angles.
  * @param satelliteElements a TLE or OMM of the satellite's orbital elements
  * @param dateTime: an ISO datetime string, unix timestamp, or javascript Date object specifying the observation time
  * @param observerPosition: an optional position object specifying the location of a satellite observer
+ * @param minimumElevationAngle: minimum horizon elevation angle used for calculating footprint and acquisition of signal (AOS)
  */
 export function observe(
   satelliteElements: TwoLineElement | OrbitMeanElementsMessage,
   dateTime: DateTimeTypes,
   observerPosition?: Position,
-  minElevationAngle?: Degrees = 0
-): SatelliteGroundTrack | SatelliteGroundTrackObservation {
-  const vectorMagnitude = (vector: { x: number; y: number; z: number }): number => {
-    return Math.hypot(vector.x, vector.y, vector.z)
-  }
-
+  minimumElevationAngle: Degrees | Radians = 0,
+  angularUnits: AngularUnits = AngularUnits.Degrees
+): SatelliteObservation {
   const dt = parseDateTime(dateTime)
   const gmst = greenwichMeanSiderealTime(dt)
   const [omm, satrec] = parseSatelliteElements(satelliteElements)
 
   // Returns the satellite position and velocity in ECI coordinations
-  const satEci = propagate(satrec, dt.toJSDate())
+  const satPropagation = propagate(satrec, dt.toJSDate())
 
   // Check for errors
-  if (satEci === null) {
+  if (satPropagation === null) {
     switch (satrec.error) {
 
       case SatRecError.MeanEccentricityOutOfRange:
@@ -88,7 +98,7 @@ export function observe(
         throw new Error('Predicted orbit eccentricity is out of range for SGP4 propagation model')
     
       case SatRecError.SemiLatusRectumBelowZero:
-        throw new Error('Predicted orbit has collapsed due to severe drag perturbations or numerical instability')
+        throw new Error('Predicted orbit has collapsed mathematically')
 
       case SatRecError.Decayed:
         return {
@@ -104,106 +114,68 @@ export function observe(
     throw new Error('Satellite propagation failed')
   }
 
-  const positionEcf = eciToEcf(satEci.position, gmst)
-  const velocityEcf = eciToEcf(satEci.velocity, gmst)
-  const geodeticPosition = eciToGeodetic(satEci.position, gmst)
-  const sunEci = sunPos(jday(dt.toJSDate())).rsun
-  const sunEcf = eciToEcf(sunEci, gmst)
-  const sunGeodeticPosition = eciToGeodetic(sunEci, gmst)
-  const eclipseFactor = shadowFraction(sunEci, satEci.position)
-  const revolutionCount = predictedRevolutionCount(omm, dt)
-  const minElevationAngleRadians = minElevationAngle * deg2rad
+  // Calculate the satellite's position and velocity in other coordinate frames
+  const satPosition = inferPosition({ eci: satPropagation.position }, gmst, angularUnits)
+  const satVelocity = inferVelocity({ eci: satPropagation.velocity }, gmst)
+
+  // Calculate the sun's position in kilometers
+  const sunEciAU = sunPos(jday(dt.toJSDate())).rsun
+  const sunEci = {
+    x: sunEciAU.x * astronomicalUnit,
+    y: sunEciAU.y * astronomicalUnit,
+    z: sunEciAU.z * astronomicalUnit
+  }
+  const sunPosition = inferPosition({ eci: sunEci }, gmst, angularUnits)
+
+  // Calculate the eclipse factor
+  const eclipseFactor = shadowFraction(sunEciAU, satPosition.eci!)
+
+  // Calculate the beta angle (radians) between the orbital plane and the Sun
+  const betaAngleRadians = betaAngle(satPropagation.meanElements, sunEci)
+
+  // Calculate the satellite's footprint
+  const footprint = (angularUnits === AngularUnits.Degrees)
+    ? footprintDiameter(satPosition, minimumElevationAngle * deg2rad)
+    : footprintDiameter(satPosition, minimumElevationAngle)
   
   // Calculate the ground track parameters
-  const groundTrack: SatelliteGroundTrack = {
+  const observation: SatelliteObservation = {
     id: omm.OBJECT_ID,
     name: omm.OBJECT_NAME,
     noradCatalogId: omm.NORAD_CAT_ID as string,
     orbitalModel: omm.MEAN_ELEMENT_THEORY,
-    epoch: dt.setZone('UTC').toISO(),
+    epoch: dt.toUTC().toISO(),
     gmst: gmst,
-    position: {
-      eci: satEci.position,
-      ecef: positionEcf,
-      latitude: degreesLat(geodeticPosition.latitude),
-      longitude: degreesLong(geodeticPosition.longitude),
-      altitude: geodeticPosition.height,
-    },
-    velocity: {
-      eci: satEci.velocity,
-      ecef: velocityEcf,
-    },
-    footprint: footprintRadius(geodeticPosition.latitude, geodeticPosition.height, minElevationAngleRadians) * 2,
+    position: (angularUnits === AngularUnits.Degrees) ? convertGeodeticToDegrees(satPosition) : satPosition,
+    velocity: satVelocity,
+    footprint: footprint,
     orbit: {
-      revolutionCount,
-      phase: ((radiansToDegrees(satEci.meanElements.mm) % 360) + 360) % 360,
-      velocity: vectorMagnitude(satEci.velocity) * 3600,
+      revolutionCount: predictedRevolutionCount(omm, dt),
+      phase: (angularUnits === AngularUnits.Degrees) ? satPropagation.meanElements.mm * rad2deg : satPropagation.meanElements.mm,
+      velocity: vectorMagnitude(satVelocity.eci!),
     },
     decayed: false,
-    geostationary: false, //ToDo: Determine if the satellite is geostationary
+    geostationary: isGeostationary(satPropagation.meanElements),
     sunlit: eclipseFactor < 1,
-    sunPosition: {
-      eci: sunEci,
-      ecef: sunEcf,
-      latitude: degreesLat(sunGeodeticPosition.latitude),
-      longitude: degreesLong(sunGeodeticPosition.longitude),
-      altitude: sunGeodeticPosition.height,
-    },
+    sunPosition: (angularUnits === AngularUnits.Degrees) ? convertGeodeticToDegrees(sunPosition) : sunPosition,
+    betaAngle: (angularUnits === AngularUnits.Degrees) ? betaAngleRadians * rad2deg : betaAngleRadians,
     eclipseFactor: eclipseFactor,
   }
 
   if (!observerPosition) {
-    return groundTrack
+    return observation
   }
 
   // If we have an observer, calculate the look angles of the satellite
-  
-  if (observerPosition.latitude === undefined || observerPosition.longitude === undefined) {
-    throw new Error('Observer position must include latitude and longitude in degrees')
-  }
-
-  const normalizedObserverPosition = {
-    latitude: observerPosition.latitude,
-    longitude: observerPosition.longitude,
-    altitude: observerPosition.altitude ?? 0,
-  }
-
-  const observerGeodetic = {
-    latitude: radiansLat(normalizedObserverPosition.latitude),
-    longitude: radiansLong(normalizedObserverPosition.longitude),
-    height: normalizedObserverPosition.altitude,
-  }
-  const observerEcf = geodeticToEcf(observerGeodetic)
-  const lookAngles = ecfToLookAngles(observerGeodetic, positionEcf)
-  const sunLookAngles = ecfToLookAngles(observerGeodetic, eciToEcf({
-    x: sunEci.x * astronomicalUnit,
-    y: sunEci.y * astronomicalUnit,
-    z: sunEci.z * astronomicalUnit,
-  }, gmst))
-  const elevation = radiansToDegrees(lookAngles.elevation)
-  const hasAos = elevation > 0
-
-  let visibility = 'visible'
-
-  if (!hasAos) {
-    visibility = 'below-horizon'
-  } else if (!isSunlit) {
-    visibility = 'eclipsed'
-  } else if (radiansToDegrees(sunLookAngles.elevation) > -6) {
-    visibility = 'daylight'
-  }
+  const observerInferedPosition = inferPosition(observerPosition, gmst, angularUnits)
+  const observerLookAngles = ecfToLookAngles(observerInferedPosition.geodetic!, satPosition.ecef!)
 
   return {
-    ...groundTrack,
-    observerPosition: {
-      ...normalizedObserverPosition,
-      ecef: observerEcf,
-    },
-    azimuth: radiansToDegrees(lookAngles.azimuth),
-    elevation,
-    slantRange: lookAngles.rangeSat,
-    dopplerFactor: dopplerFactor(observerEcf, positionEcf, velocityEcf),
-    visibility,
-    hasAos,
+    ...observation,
+    observerPosition: (angularUnits === AngularUnits.Degrees) ? convertGeodeticToDegrees(observerInferedPosition) : observerInferedPosition,
+    azimuth: (angularUnits === AngularUnits.Degrees) ? radiansToDegrees(observerLookAngles.azimuth) : observerLookAngles.azimuth,
+    elevation: (angularUnits === AngularUnits.Degrees) ? radiansToDegrees(observerLookAngles.elevation) : observerLookAngles.elevation,
+    slantRange: observerLookAngles.rangeSat,
+    dopplerFactor: dopplerFactor(observerInferedPosition.ecef!, satPosition.ecef!, satVelocity.ecef!),
   }
 }

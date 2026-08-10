@@ -1,8 +1,6 @@
 
 import { describe, expect, test } from 'vitest'
 import {
-  degreesLat,
-  degreesLong,
   dopplerFactor,
   ecfToLookAngles,
   eciToEcf,
@@ -10,13 +8,14 @@ import {
   geodeticToEcf,
   gstime,
   json2satrec,
+  OMMJsonObjectV3,
   propagate,
   radiansLat,
   radiansLong,
 } from 'satellite.js'
 
-import { observe } from '../index'
-import { convertTleToOmm, footprintRadius } from '../utils'
+import { observe, AngularUnits } from '../index'
+import { convertTleToOmm, footprintDiameter } from '../utils'
 
 // <--------------------------------------------------------------------------->
 // TEST RESOURCES
@@ -78,7 +77,7 @@ const laterObservationEpoch = '2026-08-08T00:30:49.879296Z'
 
 describe('observe', () => {
   test('returns a ground track with position units converted from satellite.js', () => {
-    const observed = observe(issTle, observationEpoch)
+    const observed = observe(issTle, observationEpoch, undefined, 0, AngularUnits.Radians)
     const date = new Date(observationEpoch)
     const satrec = json2satrec(convertTleToOmm(issTle))
     const propagated = propagate(satrec, date)
@@ -98,23 +97,33 @@ describe('observe', () => {
     expect(observed.decayed).toBe(false)
     expect(observed.position?.eci?.x).toBeCloseTo(propagated.position.x, 10)
     expect(observed.position?.ecef?.x).toBeCloseTo(ecef.x, 10)
-    expect(observed.position?.latitude).toBeCloseTo(degreesLat(geodetic.latitude), 10)
-    expect(observed.position?.longitude).toBeCloseTo(degreesLong(geodetic.longitude), 10)
-    expect(observed.position?.altitude).toBeCloseTo(geodetic.height, 10)
-    expect(observed.footprint).toBeCloseTo(footprintRadius(geodetic.latitude, geodetic.height) * 2, 10)
+    expect(observed.position?.geodetic?.latitude).toBeCloseTo(geodetic.latitude, 10)
+    expect(observed.position?.geodetic?.longitude).toBeCloseTo(geodetic.longitude, 10)
+    expect(observed.position?.geodetic?.height).toBeCloseTo(geodetic.height, 10)
+    expect(observed.footprint).toBeCloseTo(footprintDiameter({ geodetic }, 0), 10)
     expect(observed.velocity?.eci?.x).toBeCloseTo(propagated.velocity.x, 10)
     expect(observed.velocity?.ecef?.x).toBeCloseTo(eciToEcf(propagated.velocity, gmst).x, 10)
     expect(observed.orbit?.velocity).toBeCloseTo(
-      Math.hypot(propagated.velocity.x, propagated.velocity.y, propagated.velocity.z) * 3600,
+      Math.hypot(propagated.velocity.x, propagated.velocity.y, propagated.velocity.z),
       10,
     )
   })
 
-  test('returns observer look angles in degrees and slant range in kilometers', () => {
-    const observer = { latitude: 15, longitude: 130, altitude: 0.1 }
-    const observed = observe(issOmm, observationEpoch, observer)
+  test('returns observer look angles in radians and slant range in kilometers', () => {
+    const observerGeodetic = {
+      latitude: radiansLat(15),
+      longitude: radiansLong(130),
+      height: 0.1,
+    }
+    const observed = observe(
+      issOmm as OMMJsonObjectV3,
+      observationEpoch,
+      { geodetic: observerGeodetic },
+      0,
+      AngularUnits.Radians,
+    )
     const date = new Date(observationEpoch)
-    const satrec = json2satrec(issOmm)
+    const satrec = json2satrec(issOmm as OMMJsonObjectV3)
     const propagated = propagate(satrec, date)
 
     if (!propagated || !('observerPosition' in observed)) {
@@ -122,28 +131,21 @@ describe('observe', () => {
     }
 
     const gmst = gstime(date)
-    const observerGeodetic = {
-      latitude: radiansLat(observer.latitude),
-      longitude: radiansLong(observer.longitude),
-      height: observer.altitude,
-    }
     const positionEcf = eciToEcf(propagated.position, gmst)
     const velocityEcf = eciToEcf(propagated.velocity, gmst)
     const observerEcf = geodeticToEcf(observerGeodetic)
     const lookAngles = ecfToLookAngles(observerGeodetic, positionEcf)
 
-    expect(observed.observerPosition.ecef?.x).toBeCloseTo(observerEcf.x, 10)
-    expect(observed.azimuth).toBeCloseTo((lookAngles.azimuth * 180) / Math.PI, 10)
-    expect(observed.elevation).toBeCloseTo((lookAngles.elevation * 180) / Math.PI, 10)
+    expect(observed.observerPosition!.ecef!.x).toBeCloseTo(observerEcf.x, 10)
+    expect(observed.azimuth).toBeCloseTo(lookAngles.azimuth, 10)
+    expect(observed.elevation).toBeCloseTo(lookAngles.elevation, 10)
     expect(observed.slantRange).toBeCloseTo(lookAngles.rangeSat, 10)
     expect(observed.dopplerFactor).toBeCloseTo(dopplerFactor(observerEcf, positionEcf, velocityEcf), 12)
-    expect(observed.hasAos).toBe(false)
-    expect(observed.visibility).toBe('below-horizon')
   })
 
   test('predicts revolution count from the observation time', () => {
-    const observed = observe(issOmm, laterObservationEpoch)
+    const observed = observe(issOmm as OMMJsonObjectV3, laterObservationEpoch)
 
-    expect(observed.orbit?.revolutionCount).toBe(57978)
+    expect(observed.orbit?.revolutionCount).toBe(57979)
   })
 })

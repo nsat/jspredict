@@ -15,6 +15,25 @@ export const rad2deg: number = 180.0 / Math.PI
 /** Number of milliseconds in a day */
 export const day2ms: number = 1000 * 60 * 60 * 24; 
 
+/**
+ * Geostationary mean motion in radians per minute.
+ * A geostationary satellite completes one revolution per sidereal day
+ * (86164.0905 seconds), matching Earth's rotation.
+ */
+export const geostationaryMeanMotion: number = (2 * Math.PI) / (86164.0905 / 60);
+
+/** Tolerances used to classify a satellite as geostationary. */
+export const geostationaryTolerance = {
+  /** Maximum fractional deviation of mean motion from the sidereal rate. */
+  meanMotion: 0.01,
+
+  /** Maximum orbital eccentricity (near-circular orbit). */
+  eccentricity: 0.01,
+
+  /** Maximum orbital inclination in radians (~1 degree). */
+  inclination: 1.0 * (Math.PI / 180.0),
+} as const;
+
 /** World Geodetic System 1984 (WGS84) Parameters */
 export const WGS84 = {
   /** Semi-Major Axis Raidus (km) */
