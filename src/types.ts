@@ -27,3 +27,9 @@ export type OrbitMeanElementsMessage = OMMJsonObjectV3;
 
 /** Alias for various datetime types */
 export type DateTimeTypes = string | number | Date | DateTime
+
+/** Seconds */
+export type Seconds = number
+
+/** ISO8601 timestamp */
+export type Timestamp = string

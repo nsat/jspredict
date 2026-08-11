@@ -14,7 +14,7 @@ import {
   radiansLong,
 } from 'satellite.js'
 
-import { observe, AngularUnits } from '../index'
+import { satelliteObservation, satelliteObservations, AngularUnits } from '../index'
 import { convertTleToOmm, footprintDiameter } from '../utils'
 
 // <--------------------------------------------------------------------------->
@@ -75,9 +75,9 @@ const laterObservationEpoch = '2026-08-08T00:30:49.879296Z'
 // TESTS
 // <--------------------------------------------------------------------------->
 
-describe('observe', () => {
+describe('satelliteObservation', () => {
   test('returns a ground track with position units converted from satellite.js', () => {
-    const observed = observe(issTle, observationEpoch, undefined, 0, AngularUnits.Radians)
+    const observed = satelliteObservation(issTle, observationEpoch, undefined, 0, AngularUnits.Radians)
     const date = new Date(observationEpoch)
     const satrec = json2satrec(convertTleToOmm(issTle))
     const propagated = propagate(satrec, date)
@@ -115,7 +115,7 @@ describe('observe', () => {
       longitude: radiansLong(130),
       height: 0.1,
     }
-    const observed = observe(
+    const observed = satelliteObservation(
       issOmm as OMMJsonObjectV3,
       observationEpoch,
       { geo: observerGeodetic },
@@ -144,8 +144,46 @@ describe('observe', () => {
   })
 
   test('predicts revolution count from the observation time', () => {
-    const observed = observe(issOmm as OMMJsonObjectV3, laterObservationEpoch)
+    const observed = satelliteObservation(issOmm as OMMJsonObjectV3, laterObservationEpoch)
 
     expect(observed.orbit?.revolutionCount).toBe(57979)
+  })
+})
+
+describe('satelliteObservations', () => {
+  test('returns one observation per datetime, matching individual satelliteObservation calls', () => {
+    const dateTimes = [observationEpoch, laterObservationEpoch]
+    const observerPosition = {
+      geo: {
+        latitude: radiansLat(15),
+        longitude: radiansLong(130),
+        height: 0.1,
+      },
+    }
+
+    const observed = satelliteObservations(
+      issOmm as OMMJsonObjectV3,
+      dateTimes,
+      observerPosition,
+      0,
+      AngularUnits.Radians,
+    )
+
+    expect(observed).toHaveLength(dateTimes.length)
+
+    dateTimes.forEach((dateTime, index) => {
+      const expected = satelliteObservation(
+        issOmm as OMMJsonObjectV3,
+        dateTime,
+        observerPosition,
+        0,
+        AngularUnits.Radians,
+      )
+      expect(observed[index]).toStrictEqual(expected)
+    })
+  })
+
+  test('returns an empty array when no datetimes are provided', () => {
+    expect(satelliteObservations(issOmm as OMMJsonObjectV3, [])).toStrictEqual([])
   })
 })

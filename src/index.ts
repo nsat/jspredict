@@ -31,6 +31,29 @@
 import { SatelliteObservation, Position } from "./interfaces";
 import { astronomicalUnit, deg2rad, rad2deg } from "./constants";
 import { TwoLineElement, DateTimeTypes, OrbitMeanElementsMessage, Degrees, Radians } from "./types";
+
+// Re-export the public interfaces so consumers can import them from the module root
+export type {
+  Position,
+  Velocity,
+  Orbit,
+  SatelliteObservation,
+  SatelliteTransit,
+} from "./interfaces";
+
+// Re-export the public types so consumers can import them from the module root
+export type {
+  Kilometers,
+  KilometersPerSecond,
+  KilometersPerHour,
+  Radians,
+  Degrees,
+  AstronomialUnits,
+  TwoLineElement,
+  OrbitMeanElementsMessage,
+  DateTimeTypes,
+} from "./types";
+
 import {
   footprintDiameter,
   greenwichMeanSiderealTime,
@@ -48,7 +71,6 @@ import {
   dopplerFactor,
   ecfToLookAngles,
   jday,
-  Kilometer,
   propagate,
   radiansToDegrees,
   SatRecError,
@@ -66,11 +88,18 @@ export enum AngularUnits {
  * Calculates satellite observation parameters such as postion, velocity, and 
  * observer look angles.
  * @param satelliteElements a TLE or OMM of the satellite's orbital elements
- * @param dateTime: an ISO datetime string, unix timestamp, or javascript Date object specifying the observation time
- * @param observerPosition: an optional position object specifying the location of a satellite observer
- * @param minimumElevationAngle: minimum horizon elevation angle used for calculating footprint and acquisition of signal (AOS)
+ * @param dateTime: an ISO datetime string, unix timestamp, Javascript Date 
+ *    object, or luxon DateTime object specifying the observation time
+ * @param observerPosition: (optional) a position object specifying the location 
+ *    of a satellite observer
+ * @param minimumElevationAngle: (optional) minimum horizon elevation angle used 
+ *    for calculating footprint and acquisition of signal (AOS), default is 0 
+ *    degrees above the horizon
+ * @param angularUnits: (optional) specifies which angular units are used for 
+ *    inputs and outputs, default is Degrees
+ * Returns SatelliteObservation object
  */
-export function observe(
+export function satelliteObservation(
   satelliteElements: TwoLineElement | OrbitMeanElementsMessage,
   dateTime: DateTimeTypes,
   observerPosition?: Position,
@@ -138,6 +167,13 @@ export function observe(
     ? footprintDiameter(satPosition, minimumElevationAngle * deg2rad)
     : footprintDiameter(satPosition, minimumElevationAngle)
   
+  // Calculate the orbital phase from the mean anomaly, normalized to [0, 2*PI). This matches
+  // the phase definition used by the original predict/pypredict libraries, where phase is
+  // computed as (xlt - xnode - omgadf) which reduces to the mean anomaly plus small
+  // long-period/secular corrections, measured from perigee.
+  const twoPi = 2 * Math.PI
+  const phaseRadians = ((satPropagation.meanElements.mm % twoPi) + twoPi) % twoPi
+
   // Calculate the ground track parameters
   const observation: SatelliteObservation = {
     id: omm.OBJECT_ID,
@@ -151,7 +187,8 @@ export function observe(
     footprint: footprint,
     orbit: {
       revolutionCount: predictedRevolutionCount(omm, dt),
-      phase: (angularUnits === AngularUnits.Degrees) ? satPropagation.meanElements.mm * rad2deg : satPropagation.meanElements.mm,
+      phase: (angularUnits === AngularUnits.Degrees) ? phaseRadians * rad2deg : phaseRadians,
+      phase256: phaseRadians * (256 / twoPi),
       velocity: vectorMagnitude(satVelocity.eci!),
     },
     decayed: false,
@@ -178,4 +215,32 @@ export function observe(
     slantRange: observerLookAngles.rangeSat,
     dopplerFactor: dopplerFactor(observerInferedPosition.ecef!, satPosition.ecef!, satVelocity.ecef!),
   }
+}
+
+/**
+ * Calculates satellite observation parameters such as postion, velocity, and 
+ * observer look angles at the specified datetimes.
+ * @param satelliteElements a TLE or OMM of the satellite's orbital elements
+ * @param dateTimes: an array of ISO datetime strings, unix timestamps, 
+ *    Javascript Date objects, or luxon DateTime objects specifying the 
+ *    observation times
+ * @param observerPosition: (optional) a position object specifying the location 
+ *    of a satellite observer
+ * @param minimumElevationAngle: (optional) minimum horizon elevation angle used 
+ *    for calculating footprint and acquisition of signal (AOS), default is 0 
+ *    degrees above the horizon
+ * @param angularUnits: (optional) specifies which angular units are used for 
+ *    inputs and outputs, default is Degrees
+ * Returns array of SatelliteObservation objects
+ */
+export function satelliteObservations(
+  satelliteElements: TwoLineElement | OrbitMeanElementsMessage,
+  dateTimes: DateTimeTypes[],
+  observerPosition?: Position,
+  minimumElevationAngle: Degrees | Radians = 0,
+  angularUnits: AngularUnits = AngularUnits.Degrees
+): SatelliteObservation[] {
+  return dateTimes.map((dateTime) =>
+    satelliteObservation(satelliteElements, dateTime, observerPosition, minimumElevationAngle, angularUnits)
+  )
 }
