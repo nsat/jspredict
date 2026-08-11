@@ -97,10 +97,10 @@ describe('observe', () => {
     expect(observed.decayed).toBe(false)
     expect(observed.position?.eci?.x).toBeCloseTo(propagated.position.x, 10)
     expect(observed.position?.ecef?.x).toBeCloseTo(ecef.x, 10)
-    expect(observed.position?.geodetic?.latitude).toBeCloseTo(geodetic.latitude, 10)
-    expect(observed.position?.geodetic?.longitude).toBeCloseTo(geodetic.longitude, 10)
-    expect(observed.position?.geodetic?.height).toBeCloseTo(geodetic.height, 10)
-    expect(observed.footprint).toBeCloseTo(footprintDiameter({ geodetic }, 0), 10)
+    expect(observed.position?.geo?.latitude).toBeCloseTo(geodetic.latitude, 10)
+    expect(observed.position?.geo?.longitude).toBeCloseTo(geodetic.longitude, 10)
+    expect(observed.position?.geo?.height).toBeCloseTo(geodetic.height, 10)
+    expect(observed.footprint).toBeCloseTo(footprintDiameter({ geo: geodetic }, 0), 10)
     expect(observed.velocity?.eci?.x).toBeCloseTo(propagated.velocity.x, 10)
     expect(observed.velocity?.ecef?.x).toBeCloseTo(eciToEcf(propagated.velocity, gmst).x, 10)
     expect(observed.orbit?.velocity).toBeCloseTo(
@@ -118,7 +118,7 @@ describe('observe', () => {
     const observed = observe(
       issOmm as OMMJsonObjectV3,
       observationEpoch,
-      { geodetic: observerGeodetic },
+      { geo: observerGeodetic },
       0,
       AngularUnits.Radians,
     )

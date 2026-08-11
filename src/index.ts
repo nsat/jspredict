@@ -168,7 +168,7 @@ export function observe(
 
   // If we have an observer, calculate the look angles of the satellite
   const observerInferedPosition = inferPosition(observerPosition, gmst, angularUnits)
-  const observerLookAngles = ecfToLookAngles(observerInferedPosition.geodetic!, satPosition.ecef!)
+  const observerLookAngles = ecfToLookAngles(observerInferedPosition.geo!, satPosition.ecef!)
 
   return {
     ...observation,

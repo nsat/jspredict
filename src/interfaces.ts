@@ -10,7 +10,7 @@ export interface Position {
   ecef?: EcfVec3<Kilometers>
 
   /** Position in Geodetic coordinats measured in radians and kilometers */
-  geodetic?: GeodeticLocation
+  geo?: GeodeticLocation
 }
 
 /** Velocity parameters */

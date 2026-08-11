@@ -15,7 +15,6 @@ import {
   radiansLat,
   radiansLong,
   degreesLat,
-  EcfPositionCalculator,
   degreesLong,
   MeanElements
 } from "satellite.js";
@@ -129,8 +128,8 @@ export function earthCentralAngle(re: Kilometers, altitude: Kilometers, minEleva
  * @param minElevationAngle minimum elevation angle (radians)
  */
  export function footprintDiameter(satPosition: Position, minElevationAngle: Radians = 0.0): Kilometers {
-   const re = localEarthRadius(satPosition.geodetic!.latitude);
-   const lambda = earthCentralAngle(re, satPosition.geodetic!.height, minElevationAngle)
+   const re = localEarthRadius(satPosition.geo!.latitude);
+   const lambda = earthCentralAngle(re, satPosition.geo!.height, minElevationAngle)
    const footprint = re * lambda * 2
    return footprint
  }
@@ -322,25 +321,25 @@ export function inferPosition(position: Position, gmst: Radians, angularUnits: A
   const ecefMissing = (!position.ecef);
   
   // Missing Geodetic coordinates
-  const geodeticMissing = (!position.geodetic);
+  const geodeticMissing = (!position.geo);
 
   // Convert the geodetic coordinates to radians if necessary
   let geodetic: GeodeticLocation | undefined;
  
   if (!geodeticMissing && angularUnits === AngularUnits.Degrees) {
     geodetic = {
-      latitude: radiansLat(position.geodetic!.latitude),
-      longitude: radiansLong(position.geodetic!.longitude),
-      height: position.geodetic!.height
+      latitude: radiansLat(position.geo!.latitude),
+      longitude: radiansLong(position.geo!.longitude),
+      height: position.geo!.height
     }
   } else if (!geodeticMissing && angularUnits == AngularUnits.Radians) {
-    geodetic = position.geodetic
+    geodetic = position.geo
   }
   
   // Populate available coordinates 
   inferedPosition.eci = !eciMissing ? position.eci : undefined;
   inferedPosition.ecef = !ecefMissing ? position.ecef : undefined;
-  inferedPosition.geodetic = !geodeticMissing ? geodetic : undefined;
+  inferedPosition.geo = !geodeticMissing ? geodetic : undefined;
 
   // Calculate the missing coordinate frames
   const decisionFlag = `${eciMissing}:${ecefMissing}:${geodeticMissing}`
@@ -361,7 +360,7 @@ export function inferPosition(position: Position, gmst: Radians, angularUnits: A
     // ECI and Geodetic are missing, ECEF is available
     case 'true:false:true':
       inferedPosition.eci = ecfToEci(position.ecef!, gmst)
-      inferedPosition.geodetic = eciToGeodetic(inferedPosition.eci, gmst)
+      inferedPosition.geo = eciToGeodetic(inferedPosition.eci, gmst)
       break;
       
     // ECEF is missing, ECI and Geodetic are available
@@ -372,12 +371,12 @@ export function inferPosition(position: Position, gmst: Radians, angularUnits: A
     // ECEF and Geodetic are missing, ECI is available
     case 'false:true:true':
       inferedPosition.ecef = eciToEcf(position.eci!, gmst)
-      inferedPosition.geodetic = eciToGeodetic(position.eci!, gmst)
+      inferedPosition.geo = eciToGeodetic(position.eci!, gmst)
       break;
     
     // Geodetic is missing, ECI and ECEF are available
     case 'false:false:true':
-      inferedPosition.geodetic = eciToGeodetic(position.eci!, gmst)
+      inferedPosition.geo = eciToGeodetic(position.eci!, gmst)
       break;
 
     // All 3 coordinate frames are missing
@@ -439,10 +438,10 @@ export function convertGeodeticToDegrees(position: Position): Position {
   return {
     eci: position.eci,
     ecef: position.ecef,
-    geodetic: {
-      latitude: degreesLat(position.geodetic!.latitude),
-      longitude: degreesLong(position.geodetic!.longitude),
-      height: position.geodetic!.height
+    geo: {
+      latitude: degreesLat(position.geo!.latitude),
+      longitude: degreesLong(position.geo!.longitude),
+      height: position.geo!.height
     }
   }
 }

@@ -81,7 +81,7 @@ describe('utils.earthCentralAngle', () => {
 
 describe('utils.footprintDiameter', () => {
   test('returns zero when altitude is zero', () => {
-    const position = { geodetic: { latitude: 0, longitude: 0, height: 0 } }
+    const position = { geo: { latitude: 0, longitude: 0, height: 0 } }
 
     expect(footprintDiameter(position, 0)).toBeCloseTo(0, 12)
   })
@@ -94,7 +94,7 @@ describe('utils.footprintDiameter', () => {
       localEarthRadius(latitude) *
       earthCentralAngle(localEarthRadius(latitude), altitude, epsilon) *
       2
-    const position = { geodetic: { latitude, longitude: 0, height: altitude } }
+    const position = { geo: { latitude, longitude: 0, height: altitude } }
 
     expect(footprintDiameter(position, epsilon)).toBeCloseTo(expected, 10)
   })
@@ -228,21 +228,21 @@ describe('utils.inferPosition', () => {
   }
 
   const expectGeodeticCloseTo = (position: {
-    geodetic?: { latitude: number; longitude: number; height: number }
+    geo?: { latitude: number; longitude: number; height: number }
   }) => {
     const geodetic = eciToGeodetic(inferEci, inferGmst)
 
-    expect(position.geodetic).toBeDefined()
-    expect(position.geodetic!.latitude).toBeCloseTo(geodetic.latitude, 9)
-    expect(position.geodetic!.longitude).toBeCloseTo(geodetic.longitude, 9)
-    expect(position.geodetic!.height).toBeCloseTo(geodetic.height, 6)
+    expect(position.geo).toBeDefined()
+    expect(position.geo!.latitude).toBeCloseTo(geodetic.latitude, 9)
+    expect(position.geo!.longitude).toBeCloseTo(geodetic.longitude, 9)
+    expect(position.geo!.height).toBeCloseTo(geodetic.height, 6)
   }
 
   test('infers ECI from ECEF and geodetic coordinates', () => {
     const result = inferPosition(
       {
         ecef: inferEcef,
-        geodetic: inferGeodetic,
+        geo: inferGeodetic,
       },
       inferGmst,
       AngularUnits.Radians,
@@ -250,15 +250,15 @@ describe('utils.inferPosition', () => {
 
     expectVec3CloseTo(result.eci, ecfToEci(inferEcef, inferGmst))
     expectVec3CloseTo(result.ecef, inferEcef)
-    expect(result.geodetic).toBe(inferGeodetic)
+    expect(result.geo).toBe(inferGeodetic)
   })
 
   test('infers ECEF and ECI from geodetic coordinates only', () => {
-    const result = inferPosition({ geodetic: inferGeodetic }, inferGmst, AngularUnits.Radians)
+    const result = inferPosition({ geo: inferGeodetic }, inferGmst, AngularUnits.Radians)
 
     expectVec3CloseTo(result.ecef, inferEcef)
     expectVec3CloseTo(result.eci, inferEci)
-    expect(result.geodetic).toBe(inferGeodetic)
+    expect(result.geo).toBe(inferGeodetic)
   })
 
   test('infers ECI and geodetic from ECEF coordinates only', () => {
@@ -273,7 +273,7 @@ describe('utils.inferPosition', () => {
     const result = inferPosition(
       {
         eci: inferEci,
-        geodetic: inferGeodetic,
+        geo: inferGeodetic,
       },
       inferGmst,
       AngularUnits.Radians,
@@ -281,7 +281,7 @@ describe('utils.inferPosition', () => {
 
     expectVec3CloseTo(result.ecef, eciToEcf(inferEci, inferGmst))
     expectVec3CloseTo(result.eci, inferEci)
-    expect(result.geodetic).toBe(inferGeodetic)
+    expect(result.geo).toBe(inferGeodetic)
   })
 
   test('infers ECEF and geodetic from ECI coordinates only', () => {
@@ -305,7 +305,7 @@ describe('utils.inferPosition', () => {
       {
         eci: inferEci,
         ecef: inferEcef,
-        geodetic: inferGeodetic,
+        geo: inferGeodetic,
       },
       inferGmst,
       AngularUnits.Radians,
@@ -313,7 +313,7 @@ describe('utils.inferPosition', () => {
 
     expect(result.eci).toBe(inferEci)
     expect(result.ecef).toBe(inferEcef)
-    expect(result.geodetic).toBe(inferGeodetic)
+    expect(result.geo).toBe(inferGeodetic)
   })
 
   test('round-trips consistently regardless of which frame is provided', () => {
@@ -322,9 +322,9 @@ describe('utils.inferPosition', () => {
 
     expectVec3CloseTo(fromEci.ecef, fromEcef.ecef!)
     expectVec3CloseTo(fromEcef.eci, fromEci.eci!)
-    expect(fromEci.geodetic!.latitude).toBeCloseTo(fromEcef.geodetic!.latitude, 9)
-    expect(fromEci.geodetic!.longitude).toBeCloseTo(fromEcef.geodetic!.longitude, 9)
-    expect(fromEci.geodetic!.height).toBeCloseTo(fromEcef.geodetic!.height, 6)
+    expect(fromEci.geo!.latitude).toBeCloseTo(fromEcef.geo!.latitude, 9)
+    expect(fromEci.geo!.longitude).toBeCloseTo(fromEcef.geo!.longitude, 9)
+    expect(fromEci.geo!.height).toBeCloseTo(fromEcef.geo!.height, 6)
   })
 
   test('throws when no coordinate frame is provided', () => {
