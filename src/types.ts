@@ -7,9 +7,6 @@ export type Kilometers = number;
 /** Kilometers per second */
 export type KilometersPerSecond = number;
 
-/** Kilometers per hour */
-export type KilometersPerHour = number;
-
 /** Radians */
 export type Radians = number; 
 
@@ -25,11 +22,8 @@ export type TwoLineElement = string;
 /** Orbit Mean-Elements Message */
 export type OrbitMeanElementsMessage = OMMJsonObjectV3;
 
-/** Alias for various datetime types */
-export type DateTimeTypes = string | number | Date | DateTime
+/** Alias for various timestamp types */
+export type Timestamp = DateTime | Date | string | number
 
 /** Seconds */
 export type Seconds = number
-
-/** ISO8601 timestamp */
-export type Timestamp = string

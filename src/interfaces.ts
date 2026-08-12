@@ -1,5 +1,14 @@
 import { EcfVec3, EciVec3, GeodeticLocation } from "satellite.js"
-import { Radians, Degrees, Kilometers, KilometersPerSecond, Seconds, Timestamp } from "./types.ts"
+import { Radians, Degrees, Kilometers, KilometersPerSecond, Timestamp, Seconds } from "./types.ts"
+import { AngularUnits, TimestampType } from "./enums.ts"
+
+export interface UnitOptions {
+  /** Set the unit type for angular measurements */
+  angular?: AngularUnits
+
+  /** Set the output type for timestamps */
+  timestamp?: TimestampType
+}
 
 /** Position parameters */
 export interface Position {
@@ -60,7 +69,7 @@ export interface SatelliteObservation {
   noradCatalogId: string | number
 
   /** Prediction UTC timestamp (ISO8601 format) */
-  epoch: Timestamp | null
+  epoch?: Timestamp
   
   /** Prediction Greenwich Sidereal Time (GMST) */
   gmst?: Radians

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { ecfToEci, eciToEcf, eciToGeodetic, geodeticToEcf } from 'satellite.js'
 
 import { WGS84, deg2rad } from '../constants'
-import { AngularUnits } from '../index'
+import { AngularUnits } from '../enums'
 import {
   convertTleToOmm,
   earthCentralAngle,
@@ -12,7 +12,7 @@ import {
   inferPosition,
   inferVelocity,
   localEarthRadius,
-  parseDateTime,
+  parseTimestamp,
   predictedRevolutionCount,
 } from '../utils'
 
@@ -100,9 +100,9 @@ describe('utils.footprintDiameter', () => {
   })
 })
 
-describe('utils.parseDateTime', () => {
+describe('utils.parseTimestamp', () => {
   test('parses datetime strings as UTC when no timezone is provided', () => {
-    const parsedDate = parseDateTime('2026-07-15T14:30:42.137')
+    const parsedDate = parseTimestamp('2026-07-15T14:30:42.137')
 
     expect(parsedDate.year).toBe(2026)
     expect(parsedDate.month).toBe(7)
@@ -115,7 +115,7 @@ describe('utils.parseDateTime', () => {
   })
 
   test('preserves timezone data when the datetime string includes it', () => {
-    const parsedDate = parseDateTime('2026-07-15T14:30:42.137-04:00')
+    const parsedDate = parseTimestamp('2026-07-15T14:30:42.137-04:00')
 
     expect(parsedDate.year).toBe(2026)
     expect(parsedDate.month).toBe(7)
@@ -130,7 +130,7 @@ describe('utils.parseDateTime', () => {
 
   test('parses unix timestamps', () => {
     const timestamp = Date.UTC(2026, 6, 15, 14, 30, 42, 137)
-    const parsedDate = parseDateTime(timestamp)
+    const parsedDate = parseTimestamp(timestamp)
 
     expect(parsedDate.toMillis()).toBe(timestamp)
     expect(parsedDate.zoneName).toBe('UTC')
@@ -138,7 +138,7 @@ describe('utils.parseDateTime', () => {
 
   test('parses JS Date objects', () => {
     const date = new Date(2026, 6, 15, 14, 30, 42, 137)
-    const parsedDate = parseDateTime(date)
+    const parsedDate = parseTimestamp(date)
     const expected = DateTime.fromJSDate(date)
 
     expect(parsedDate.toMillis()).toBe(date.getTime())
@@ -155,11 +155,11 @@ describe('utils.parseDateTime', () => {
   test('returns existing luxon DateTime instances unchanged', () => {
     const dateTime = DateTime.utc(2026, 7, 15, 14, 30, 42, 137)
 
-    expect(parseDateTime(dateTime)).toBe(dateTime)
+    expect(parseTimestamp(dateTime)).toBe(dateTime)
   })
 
   test('throws errors for unsupported types', () => {
-    expect(() => parseDateTime({} as never)).toThrow('Unsupported datetime type')
+    expect(() => parseTimestamp({} as never)).toThrow('Unsupported datetime type')
   })
 })
 

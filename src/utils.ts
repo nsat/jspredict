@@ -1,11 +1,18 @@
 import { DateTime } from "luxon";
-import { Position, Velocity } from "./interfaces.ts";
-import { WGS84, day2ms, geostationaryMeanMotion, geostationaryTolerance } from "./constants.ts";
-import type { Radians, Kilometers, DateTimeTypes } from "./types.ts";
+import { Position, SatelliteObservation, TransitEvent, UnitOptions, Velocity } from "./interfaces.ts";
+import { WGS84, astronomicalUnit, day2ms, geostationaryMeanMotion, geostationaryTolerance, rad2deg } from "./constants.ts";
+import type { Degrees, Kilometers, Radians, Timestamp } from "./types.ts";
 import { TwoLineElement, OrbitMeanElementsMessage } from "./types.ts";
+import { AngularUnits, TimestampType } from "./enums.ts";
 import {
+  dopplerFactor,
+  ecfToLookAngles,
   gstime,
+  jday,
+  propagate,
+  radiansToDegrees,
   SatRec,
+  SatRecError,
   json2satrec,
   geodeticToEcf,
   ecfToEci,
@@ -16,9 +23,10 @@ import {
   radiansLong,
   degreesLat,
   degreesLong,
-  MeanElements
+  MeanElements,
+  shadowFraction,
+  sunPos,
 } from "satellite.js";
-import { AngularUnits } from "./index.ts";
 
 // <--------------------------------------------------------------------------->
 // UTILITY FUNCTIONS
@@ -135,35 +143,35 @@ export function earthCentralAngle(re: Kilometers, altitude: Kilometers, minEleva
  }
 
  /**
-  * Convert the datetime string, unix timestamp (ms), or Date object to a luxon.DateTime object.
+  * Convert the timestamp to a luxon.DateTime object.
   */
-export function parseDateTime(dateTime: DateTimeTypes): DateTime {
+export function parseTimestamp(timestamp: Timestamp): DateTime {
   // 1. Check if object is already a luxon.DateTime.
   // Use DateTime.isDateTime instead of `instanceof` so a DateTime created by a
   // different copy of the luxon module (e.g. the caller's own install) is still
   // recognized, since `instanceof` fails across module boundaries.
-  if (DateTime.isDateTime(dateTime)) {
-    return dateTime
+  if (DateTime.isDateTime(timestamp)) {
+    return timestamp
   }
   
   // 2. Check for native Date object
-  if (dateTime instanceof Date) {
-    return DateTime.fromJSDate(dateTime);
+  if (timestamp instanceof Date) {
+    return DateTime.fromJSDate(timestamp);
   }
 
   // 3. Check for number (timestamp)
-  if (typeof dateTime === 'number') {
-    return DateTime.fromMillis(dateTime, { zone: "UTC"});
+  if (typeof timestamp === 'number') {
+    return DateTime.fromMillis(timestamp, { zone: "UTC"});
   }
 
   // 4. Fallback to string (ISO or standard format)
-  if (typeof dateTime === 'string') {
-    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(dateTime)
+  if (typeof timestamp === 'string') {
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
 
     // Assume UTC only when the string does not already include timezone data.
     return hasExplicitTimezone
-      ? DateTime.fromISO(dateTime, { setZone: true })
-      : DateTime.fromISO(dateTime, { zone: "UTC"})
+      ? DateTime.fromISO(timestamp, { setZone: true })
+      : DateTime.fromISO(timestamp, { zone: "UTC"})
   }
   
   throw new Error('Unsupported datetime type');
@@ -172,8 +180,8 @@ export function parseDateTime(dateTime: DateTimeTypes): DateTime {
 /**
  * Calculates the Greenwich Mean Sidereal Time (GMST) from a luxon.DateTime object measured in radians
  */
-export function greenwichMeanSiderealTime(dateTime: DateTime): Radians {
-  return gstime(dateTime.toJSDate())
+export function greenwichMeanSiderealTime(datetime: DateTime): Radians {
+  return gstime(datetime.toJSDate())
 }
 
 /**
@@ -183,7 +191,7 @@ export function predictedRevolutionCount(
   orbitMeanElementsMessage: OrbitMeanElementsMessage,
   observationTime: DateTime,
 ): number {
-  const elementEpoch = parseDateTime(orbitMeanElementsMessage.EPOCH)
+  const elementEpoch = parseTimestamp(orbitMeanElementsMessage.EPOCH)
 
   return Math.ceil(
     Number(orbitMeanElementsMessage.REV_AT_EPOCH ?? 0) +
@@ -443,5 +451,250 @@ export function convertGeodeticToDegrees(position: Position): Position {
       longitude: degreesLong(position.geo!.longitude),
       height: position.geo!.height
     }
+  }
+}
+
+/**
+ * Convert a luxon DateTime object to the format specified by the timestamp type
+ */
+export function formatTimestamp(datetime: DateTime, timestampType: TimestampType): Timestamp {
+  switch (timestampType) {
+    /** Return the luxon DateTime object unmodified */
+    case TimestampType.DateTime:
+      return datetime;
+
+    /** Return standard Javascript Date object */
+    case TimestampType.Date:
+      return datetime.toJSDate()
+
+    /** Return ISO8601 formatted timestamp string */
+    case TimestampType.ISO8601:
+      return datetime.toISO()!
+
+    /** Return the number of milliseconds since Unix epoch */
+    case TimestampType.Unix:
+      return datetime.toMillis()
+  }
+}
+
+/** Define the default unit options for the propagation functions. */
+export const defaultUnitOptions: UnitOptions = {
+  angular: AngularUnits.Degrees,
+  timestamp: TimestampType.ISO8601,
+}
+
+export function computeSatelliteObservation(
+  omm: OrbitMeanElementsMessage,
+  satrec: SatRec,
+  datetime: DateTime,
+  observerPosition?: Position,
+  unitOptions?: UnitOptions,
+): SatelliteObservation {
+  const unitOpts: UnitOptions = { ...defaultUnitOptions, ...(unitOptions ?? {}) }
+
+  // Returns the satellite position and velocity in ECI coordinations
+  const satPropagation = propagate(satrec, datetime.toJSDate())
+
+  // Check for errors
+  if (satPropagation === null) {
+    switch (satrec.error) {
+      case SatRecError.MeanEccentricityOutOfRange:
+        throw new Error('Orbit eccentricity is out of range for SGP4 propagation model')
+
+      case SatRecError.MeanMotionBelowZero:
+        throw new Error('Orbit mean motion is below zero')
+
+      case SatRecError.PerturbedEccentricityOutOfRange:
+        throw new Error('Predicted orbit eccentricity is out of range for SGP4 propagation model')
+
+      case SatRecError.SemiLatusRectumBelowZero:
+        throw new Error('Predicted orbit has collapsed mathematically')
+
+      case SatRecError.Decayed:
+        return {
+          id: omm.OBJECT_ID,
+          name: omm.OBJECT_NAME,
+          noradCatalogId: omm.NORAD_CAT_ID as string,
+          orbitalModel: omm.MEAN_ELEMENT_THEORY,
+          epoch: formatTimestamp(datetime, unitOpts.timestamp!),
+          decayed: true,
+        }
+    }
+
+    throw new Error('Satellite propagation failed')
+  }
+
+  const gmst = greenwichMeanSiderealTime(datetime)
+
+  // Calculate the satellite's position and velocity in other coordinate frames
+  const satPosition = inferPosition({ eci: satPropagation.position }, gmst, unitOpts.angular!)
+  const satVelocity = inferVelocity({ eci: satPropagation.velocity }, gmst)
+
+  // Calculate the sun's position in kilometers
+  const sunEciAU = sunPos(jday(datetime.toJSDate())).rsun
+  const sunEci = {
+    x: sunEciAU.x * astronomicalUnit,
+    y: sunEciAU.y * astronomicalUnit,
+    z: sunEciAU.z * astronomicalUnit,
+  }
+  const sunPosition = inferPosition({ eci: sunEci }, gmst, unitOpts.angular!)
+
+  // Calculate the eclipse factor
+  const eclipseFactor = shadowFraction(sunEciAU, satPosition.eci!)
+
+  // Calculate the beta angle (radians) between the orbital plane and the Sun
+  const betaAngleRadians = betaAngle(satPropagation.meanElements, sunEci)
+
+  // Calculate the satellite's footprint diameter, assume a minimum elevation angle of 0 degrees
+  const footprint = footprintDiameter(satPosition, 0)
+
+  // Calculate the orbital phase from the mean anomaly, normalized to [0, 2*PI). This matches
+  // the phase definition used by the original predict/pypredict libraries, where phase is
+  // computed as (xlt - xnode - omgadf) which reduces to the mean anomaly plus small
+  // long-period/secular corrections, measured from perigee.
+  const twoPi = 2 * Math.PI
+  const phaseRadians = ((satPropagation.meanElements.mm % twoPi) + twoPi) % twoPi
+
+  const observation: SatelliteObservation = {
+    id: omm.OBJECT_ID,
+    name: omm.OBJECT_NAME,
+    noradCatalogId: omm.NORAD_CAT_ID as string,
+    orbitalModel: omm.MEAN_ELEMENT_THEORY,
+    epoch: formatTimestamp(datetime, unitOpts.timestamp!),
+    gmst,
+    position: unitOpts.angular === AngularUnits.Degrees ? convertGeodeticToDegrees(satPosition) : satPosition,
+    velocity: satVelocity,
+    footprint,
+    orbit: {
+      revolutionCount: predictedRevolutionCount(omm, datetime),
+      phase: unitOpts.angular === AngularUnits.Degrees ? phaseRadians * rad2deg : phaseRadians,
+      phase256: phaseRadians * (256 / twoPi),
+      velocity: vectorMagnitude(satVelocity.eci!),
+    },
+    decayed: false,
+    geostationary: isGeostationary(satPropagation.meanElements),
+    sunlit: eclipseFactor < 1,
+    sunPosition: unitOpts.angular === AngularUnits.Degrees ? convertGeodeticToDegrees(sunPosition) : sunPosition,
+    betaAngle: unitOpts.angular === AngularUnits.Degrees ? betaAngleRadians * rad2deg : betaAngleRadians,
+    eclipseFactor,
+  }
+
+  if (!observerPosition) {
+    return observation
+  }
+
+  // If we have an observer, calculate the look angles of the satellite
+  const observerInferedPosition = inferPosition(observerPosition, gmst, unitOpts.angular!)
+  const observerLookAngles = ecfToLookAngles(observerInferedPosition.geo!, satPosition.ecef!)
+
+  return {
+    ...observation,
+    observerPosition: unitOpts.angular === AngularUnits.Degrees
+      ? convertGeodeticToDegrees(observerInferedPosition)
+      : observerInferedPosition,
+    azimuth: unitOpts.angular === AngularUnits.Degrees
+      ? radiansToDegrees(observerLookAngles.azimuth)
+      : observerLookAngles.azimuth,
+    elevation: unitOpts.angular === AngularUnits.Degrees
+      ? radiansToDegrees(observerLookAngles.elevation)
+      : observerLookAngles.elevation,
+    slantRange: observerLookAngles.rangeSat,
+    dopplerFactor: dopplerFactor(observerInferedPosition.ecef!, satPosition.ecef!, satVelocity.ecef!),
+  }
+}
+
+export function transitObservation(
+  omm: OrbitMeanElementsMessage,
+  satrec: SatRec,
+  datetime: DateTime,
+  observerPosition: Position,
+  angularUnits: AngularUnits,
+): SatelliteObservation {
+  return computeSatelliteObservation(omm, satrec, datetime, observerPosition, {
+    angular: angularUnits,
+    timestamp: TimestampType.DateTime,
+  })
+}
+
+export function isVisible(observation: SatelliteObservation, minElevation: Degrees | Radians): boolean {
+  return !observation.decayed && (observation.elevation ?? -Infinity) >= minElevation
+}
+
+export function toDateTime(milliseconds: number): DateTime {
+  return DateTime.fromMillis(milliseconds, { zone: 'UTC' })
+}
+
+export function refineHorizonCrossing(
+  startTime: DateTime,
+  startObservation: SatelliteObservation,
+  endTime: DateTime,
+  endObservation: SatelliteObservation,
+  minElevation: Degrees | Radians,
+  observeAt: (datetime: DateTime) => SatelliteObservation,
+  iterations: number,
+): { time: DateTime; observation: SatelliteObservation } {
+  let lowTime = startTime
+  let highTime = endTime
+  let lowObservation = startObservation
+  let highObservation = endObservation
+  const lowVisible = isVisible(startObservation, minElevation)
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const midpoint = toDateTime((lowTime.toMillis() + highTime.toMillis()) / 2)
+    const midpointObservation = observeAt(midpoint)
+
+    if (isVisible(midpointObservation, minElevation) === lowVisible) {
+      lowTime = midpoint
+      lowObservation = midpointObservation
+    } else {
+      highTime = midpoint
+      highObservation = midpointObservation
+    }
+  }
+
+  return Math.abs((lowObservation.elevation ?? 0) - minElevation) < Math.abs((highObservation.elevation ?? 0) - minElevation)
+    ? { time: lowTime, observation: lowObservation }
+    : { time: highTime, observation: highObservation }
+}
+
+export function refineTransitExtremum(
+  startTime: DateTime,
+  endTime: DateTime,
+  observeAt: (datetime: DateTime) => SatelliteObservation,
+  score: (observation: SatelliteObservation) => number,
+  maximize: boolean,
+  iterations: number,
+): { time: DateTime; observation: SatelliteObservation } {
+  let left = startTime.toMillis()
+  let right = endTime.toMillis()
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const oneThird = (right - left) / 3
+    const firstMid = left + oneThird
+    const secondMid = right - oneThird
+    const firstScore = score(observeAt(toDateTime(firstMid)))
+    const secondScore = score(observeAt(toDateTime(secondMid)))
+
+    if ((maximize && firstScore < secondScore) || (!maximize && firstScore > secondScore)) {
+      left = firstMid
+    } else {
+      right = secondMid
+    }
+  }
+
+  const midpoint = toDateTime((left + right) / 2)
+  return { time: midpoint, observation: observeAt(midpoint) }
+}
+
+export function buildTransitEvent(
+  time: DateTime,
+  observation: SatelliteObservation,
+  timestampType: TimestampType,
+): TransitEvent {
+  return {
+    epoch: formatTimestamp(time, timestampType),
+    azimuth: observation.azimuth!,
+    elevation: observation.elevation!,
+    slantRange: observation.slantRange!,
   }
 }
