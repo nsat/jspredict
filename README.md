@@ -104,10 +104,32 @@ input and is controlled entirely by the `timestampFormat` option — see
 [Configuration options](#configuration-options). It defaults to ISO 8601
 strings. All times are computed in UTC.
 
-### Observer position
+### The `Position` object
 
-An observer (ground station) is described by a `Position` object with a `geo`
-field holding geodetic coordinates:
+A `Position` object describes the location of an observer or celestial object. 
+A position can be expressed in any of **three coordinate frames**:
+
+```ts
+interface Position {
+  eci?:  { x: number; y: number; z: number }  // Earth-Centered Inertial (km)
+  ecef?: { x: number; y: number; z: number }  // Earth-Centered Earth-Fixed (km)
+  geo?:  { latitude: number; longitude: number; height: number } // Geodetic
+}
+```
+
+| Field | Frame | Components | Units |
+| --- | --- | --- | --- |
+| `eci` | Earth-Centered Inertial (TEME) | `x`, `y`, `z` | kilometers |
+| `ecef` | Earth-Centered Earth-Fixed | `x`, `y`, `z` | kilometers |
+| `geo` | Geodetic (relative to the WGS84 ellipsoid) | `latitude`, `longitude`, `height` | `latitude`/`longitude` in degrees by default (or radians — see `geodeticAngularUnits`); `height` in kilometers above the ellipsoid |
+
+You must provide **at least one** frame; supplying none throws
+`At least one set of ECI, ECEF, or Geodetic coordinates must be defined to infer
+position.` Whichever frame you provide, the library computes the other two, so
+the returned `position`, `observerPosition`, and `sunPosition` objects always
+provide all three frames.
+
+#### Geodetic (most common)
 
 ```ts
 const observerPosition = {
@@ -119,9 +141,39 @@ const observerPosition = {
 }
 ```
 
-By default latitude/longitude are interpreted as **degrees**. Set
-`geodeticAngularUnits: AngularUnits.Radians` in the options to supply radians
-instead.
+By default `latitude`/`longitude` are interpreted as **degrees**. Set
+`geodeticAngularUnits: AngularUnits.Radians` in the options to supply (and
+receive) radians instead. `height` is always kilometers.
+
+#### ECEF or ECI
+
+Instead of geodetic coordinates you may define a position directly in
+Earth-Centered Earth-Fixed or Earth-Centered Inertial coordinates. Both take an
+`{ x, y, z }` vector in **kilometers**:
+
+```ts
+// Define the observer in ECEF coordinates
+const observerPositionEcef = {
+  ecef: { x: -3961.04, y: 4720.58, z: 1640.13 },
+}
+
+// Or in ECI coordinates
+const observerPositionEci = {
+  eci: { x: -350.53, y: 6152.31, z: 1640.13 },
+}
+
+satelliteObservation(issOmm, "2026-08-07T00:30:49.879Z", observerPositionEcef)
+```
+
+Notes on the ECI/ECEF frames:
+
+- ECI and geodetic are time-dependent relative to each other (ECEF rotates with
+  the Earth), so the conversion between them uses the Greenwich Mean Sidereal
+  Time at the observation `epoch`. Supply an ECI vector consistent with the
+  epoch you are querying.
+- `geodeticAngularUnits` only affects the `geo` frame. When you supply `ecef`
+  or `eci`, the derived `geo` output still honors `geodeticAngularUnits` for
+  its returned units.
 
 ## `satelliteObservation`
 
