@@ -5,7 +5,7 @@ export enum AngularUnits {
 }
 
 /** Set the time units for the inputs and outputs */
-export enum TimestampType {
+export enum TimestampFormat {
   Unix = 'UNIX',
   ISO8601 = 'ISO8601',
   Date = 'DATE',

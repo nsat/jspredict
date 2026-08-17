@@ -1,22 +1,13 @@
-import { EcfVec3, EciVec3, GeodeticLocation } from "satellite.js"
-import { Radians, Degrees, Kilometers, KilometersPerSecond, Timestamp, Seconds } from "./types.ts"
-import { AngularUnits, TimestampType } from "./enums.ts"
-
-export interface UnitOptions {
-  /** Set the unit type for angular measurements */
-  angular?: AngularUnits
-
-  /** Set the output type for timestamps */
-  timestamp?: TimestampType
-}
+import { EcfVec3, EciVec3, GeodeticLocation, Radians, Degrees, Kilometer, KilometerPerSecond } from "satellite.js"
+import { Timestamp, Seconds } from "./types.ts"
 
 /** Position parameters */
 export interface Position {
   /** Position in Earth-Centered Inertial (ECI) coordinates measured in kilometers */
-  eci?: EciVec3<Kilometers>
+  eci?: EciVec3<Kilometer>
 
   /** Position in Earth-Centered Earth-Fixed (ECEF) coordinates measured in kilometers */
-  ecef?: EcfVec3<Kilometers>
+  ecef?: EcfVec3<Kilometer>
 
   /** Position in Geodetic coordinats measured in radians and kilometers */
   geo?: GeodeticLocation
@@ -25,10 +16,10 @@ export interface Position {
 /** Velocity parameters */
 export interface Velocity {
   /** Velocity vector in Earth-Centered Inertial (ECI) coordinates measured in kilometers per second */
-  eci?: EciVec3<KilometersPerSecond>
+  eci?: EciVec3<KilometerPerSecond>
 
   /** Velocity vector in Earth-Centered Earth-Fixed (ECEF) coordinates measured in kilometers per second */
-  ecef?: EcfVec3<KilometersPerSecond>
+  ecef?: EcfVec3<KilometerPerSecond>
 }
 
 /** Orbit parameters */
@@ -38,11 +29,10 @@ export interface Orbit {
 
   /**
    * The current position of the satellite in its orbit, measured from perigee as the mean
-   * anomaly (plus small long-period/secular corrections), normalized to a full revolution.
-   * Reported in radians or degrees depending on the requested angular units. This matches
-   * the phase definition used by the original predict/pypredict libraries.
+   * anomaly (plus small long-period/secular corrections), normalized to a full revolution 
+   * reported in degrees or radians depending on selected angular units.
    */
-  phase?: Radians | Degrees
+  phase?: Degrees | Radians
 
   /**
    * The current position of the satellite in its orbit expressed on a legacy 0..256 scale,
@@ -51,8 +41,8 @@ export interface Orbit {
    */
   phase256?: number
   
-  /** Satellite velocity relative to the center of the Earth in kilometers per second */
-  velocity?: KilometersPerSecond
+  /** Satellite velocity relative to the center of the Earth in kilometers per hour */
+  velocity?: KilometerPerSecond
 }
 
 /**
@@ -81,7 +71,7 @@ export interface SatelliteObservation {
   velocity?: Velocity
   
   /** The diameter of the satellite's ground coverage area (the visible circle on Earth's surface) in kilometers */
-  footprint?: Kilometers
+  footprint?: Kilometer
   
   /** Orbit revolution count */
   orbit?: Orbit;
@@ -123,7 +113,7 @@ export interface SatelliteObservation {
   elevation?: Degrees | Radians
 
   /** The direct line-of-sight distance from the observer to the satellite, measured in kilometers. */
-  slantRange?: Kilometers
+  slantRange?: Kilometer
 
   /** Satellite frequency shift (i.e doppler factor) relative to observer. */
   dopplerFactor?: number
@@ -149,7 +139,10 @@ export interface TransitEvent {
   elevation: Degrees | Radians 
 
   /** Straight line range of the satellite from the observer */
-  slantRange: Kilometers
+  slantRange: Kilometer
+
+  /** Satellite frequency shift (i.e doppler factor) relative to observer. */
+  dopplerFactor: number
 }
 
 /**
@@ -176,4 +169,57 @@ export interface SatelliteTransit {
 
   /** Peak elevation event parameters */
   peak: TransitEvent
+}
+
+/**
+ * Tunable precision and convergence controls for the transit search.
+ *
+ * The transit search first performs a coarse sampling of the satellite's
+ * elevation (and elevation rate) over each orbit to bracket candidate events,
+ * and then refines each event time using the secant method. These options
+ * control how the coarse sampling is stepped and when the secant refinement is
+ * considered "converged" or is abandoned.
+ *
+ * Crossing events (AOS, LOS, and the start/stop horizon crossings) are found by
+ * root-finding on the elevation value, so they converge on an angular tolerance
+ * in radians. Extremum events (the peak elevation and the time of closest
+ * approach) are found by root-finding on the derivative, so they converge on a
+ * *rate* tolerance: elevation rate in radians per second, and slant-range rate
+ * in kilometers per second.
+ */
+export interface TransitSearchOptions {
+  /**
+   * Angular convergence tolerance in radians for the AOS, LOS, and horizon
+   * crossing events. The refinement stops once the satellite's elevation is
+   * within this many radians of the target crossing.
+   */
+  elevationToleranceRadians?: Radians
+
+  /**
+   * Rate convergence tolerance in radians per second for the peak (culmination)
+   * event. The refinement stops once the elevation rate is within this many
+   * radians per second of zero.
+   */
+  elevationRateTolerance?: number
+
+  /**
+   * Rate convergence tolerance in kilometers per second for the time of closest
+   * approach (TCA). The refinement stops once the slant-range rate is within
+   * this many kilometers per second of zero.
+   */
+  slantRangeRateTolerance?: number
+
+  /**
+   * Maximum number of secant iterations allowed per event before the search
+   * gives up on converging and falls back to the best estimate found so far.
+   */
+  maxIterations?: number
+
+  /**
+   * Optional override for the coarse-search step size, expressed in seconds.
+   * When omitted, the step size is derived dynamically from the satellite's
+   * mean motion (mirroring Skyfield), which yields roughly 20 samples per
+   * orbital revolution.
+   */
+  coarseStepSeconds?: Seconds
 }

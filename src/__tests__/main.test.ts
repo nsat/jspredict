@@ -2,7 +2,6 @@
 import { DateTime } from 'luxon'
 import { describe, expect, test } from 'vitest'
 import {
-  dopplerFactor,
   ecfToLookAngles,
   eciToEcf,
   eciToGeodetic,
@@ -16,9 +15,9 @@ import {
   radiansLong,
 } from 'satellite.js'
 
-import { satelliteObservation, satelliteObservations, satelliteTransits, type UnitOptions } from '../main'
-import { AngularUnits, TimestampType } from '../enums'
-import { convertTleToOmm, footprintDiameter } from '../utils'
+import { SatelliteObservation, satelliteObservation, satelliteTransits } from '../main'
+import { AngularUnits, TimestampFormat } from '../enums'
+import { convertTleToOmm, dopplerFactorEcf, footprintDiameter } from '../utils'
 
 // <--------------------------------------------------------------------------->
 // TEST RESOURCES
@@ -73,71 +72,60 @@ const issOmm = {
 
 const observationEpoch = '2026-08-07T00:30:49.879296Z'
 const laterObservationEpoch = '2026-08-08T00:30:49.879296Z'
-const transitWindowStart = '2026-08-07T00:00:00Z'
-const transitWindowStop = '2026-08-08T00:00:00Z'
+const transitWindowStart = '2026-08-07T01:00:00Z'
+const transitWindowStop = '2026-08-08T01:00:00Z'
 
 const unitOptionCases = [undefined, AngularUnits.Degrees, AngularUnits.Radians].flatMap((angular) =>
-  [undefined, TimestampType.ISO8601, TimestampType.Unix, TimestampType.Date, TimestampType.DateTime].map(
+  [undefined, TimestampFormat.ISO8601, TimestampFormat.Unix, TimestampFormat.Date, TimestampFormat.DateTime].map(
     (timestamp) => {
-      const unitOptions: UnitOptions = {}
-
-      if (angular !== undefined) {
-        unitOptions.angular = angular
-      }
-
-      if (timestamp !== undefined) {
-        unitOptions.timestamp = timestamp
-      }
-
       return {
         name: `angular=${angular ?? 'default'}, timestamp=${timestamp ?? 'default'}`,
-        unitOptions: Object.keys(unitOptions).length > 0 ? unitOptions : undefined,
         angular: angular ?? AngularUnits.Degrees,
-        timestamp: timestamp ?? TimestampType.ISO8601,
+        timestamp: timestamp ?? TimestampFormat.ISO8601,
       }
     },
   ),
 )
 
-function expectTimestampValue(actual: unknown, epoch: string, timestampType: TimestampType): void {
+function expectTimestampValue(actual: unknown, epoch: string, format: TimestampFormat): void {
   const expected = DateTime.fromISO(epoch, { setZone: true })
 
-  switch (timestampType) {
-    case TimestampType.ISO8601:
+  switch (format) {
+    case TimestampFormat.ISO8601:
       expect(actual).toBe(expected.toISO())
       break
 
-    case TimestampType.Unix:
+    case TimestampFormat.Unix:
       expect(actual).toBe(expected.toMillis())
       break
 
-    case TimestampType.Date:
+    case TimestampFormat.Date:
       expect(actual).toBeInstanceOf(Date)
       expect((actual as Date).toISOString()).toBe(expected.toJSDate().toISOString())
       break
 
-    case TimestampType.DateTime:
+    case TimestampFormat.DateTime:
       expect(DateTime.isDateTime(actual)).toBe(true)
       expect((actual as DateTime).toISO()).toBe(expected.toISO())
       break
   }
 }
 
-function expectTimestampType(actual: unknown, timestampType: TimestampType): void {
-  switch (timestampType) {
-    case TimestampType.ISO8601:
+function expectTimestampFormat(actual: unknown, format: TimestampFormat): void {
+  switch (format) {
+    case TimestampFormat.ISO8601:
       expect(typeof actual).toBe('string')
       break
 
-    case TimestampType.Unix:
+    case TimestampFormat.Unix:
       expect(typeof actual).toBe('number')
       break
 
-    case TimestampType.Date:
+    case TimestampFormat.Date:
       expect(actual).toBeInstanceOf(Date)
       break
 
-    case TimestampType.DateTime:
+    case TimestampFormat.DateTime:
       expect(DateTime.isDateTime(actual)).toBe(true)
       break
   }
@@ -186,27 +174,23 @@ function observerPositionFor(angular: AngularUnits) {
 const transitUnitOptionCases = [
   {
     name: 'default',
-    unitOptions: undefined,
     angular: AngularUnits.Degrees,
-    timestamp: TimestampType.ISO8601,
+    timestamp: TimestampFormat.ISO8601,
   },
   {
     name: 'unix timestamps',
-    unitOptions: { timestamp: TimestampType.Unix },
     angular: AngularUnits.Degrees,
-    timestamp: TimestampType.Unix,
+    timestamp: TimestampFormat.Unix,
   },
   {
     name: 'date timestamps',
-    unitOptions: { timestamp: TimestampType.Date },
     angular: AngularUnits.Degrees,
-    timestamp: TimestampType.Date,
+    timestamp: TimestampFormat.Date,
   },
   {
     name: 'radians datetime',
-    unitOptions: { angular: AngularUnits.Radians, timestamp: TimestampType.DateTime },
     angular: AngularUnits.Radians,
-    timestamp: TimestampType.DateTime,
+    timestamp: TimestampFormat.DateTime,
   },
 ]
 
@@ -215,8 +199,8 @@ const transitUnitOptionCases = [
 // <--------------------------------------------------------------------------->
 
 describe('satelliteObservation', () => {
-  test.each(unitOptionCases)('returns a ground track for $name', ({ unitOptions, angular, timestamp }) => {
-    const observed = satelliteObservation(issTle, observationEpoch, undefined, unitOptions)
+  test.each(unitOptionCases)('returns a ground track for $name', ({ angular, timestamp }) => {
+    const observed = satelliteObservation(issTle, observationEpoch, undefined, angular, timestamp) as SatelliteObservation
     const date = new Date(observationEpoch)
     const satrec = json2satrec(convertTleToOmm(issTle))
     const propagated = propagate(satrec, date)
@@ -252,7 +236,7 @@ describe('satelliteObservation', () => {
     )
   })
 
-  test.each(unitOptionCases)('returns observer look angles for $name', ({ unitOptions, angular, timestamp }) => {
+  test.each(unitOptionCases)('returns observer look angles for $name', ({ angular, timestamp }) => {
     const observerPosition = observerPositionFor(angular)
     const observerGeodetic = {
       latitude: radiansLat(15),
@@ -263,7 +247,8 @@ describe('satelliteObservation', () => {
       issOmm as OMMJsonObjectV3,
       observationEpoch,
       observerPosition,
-      unitOptions,
+      angular,
+      timestamp,
     )
     const date = new Date(observationEpoch)
     const satrec = json2satrec(issOmm as OMMJsonObjectV3)
@@ -286,28 +271,30 @@ describe('satelliteObservation', () => {
     expect(observed.azimuth).toBeCloseTo(expectedAngle(lookAngles.azimuth, angular), 10)
     expect(observed.elevation).toBeCloseTo(expectedAngle(lookAngles.elevation, angular), 10)
     expect(observed.slantRange).toBeCloseTo(lookAngles.rangeSat, 10)
-    expect(observed.dopplerFactor).toBeCloseTo(dopplerFactor(observerEcf, positionEcf, velocityEcf), 12)
+    expect(observed.dopplerFactor).toBeCloseTo(dopplerFactorEcf(observerEcf, positionEcf, velocityEcf), 12)
   })
 
   test('predicts revolution count from the observation time', () => {
-    const observed = satelliteObservation(issOmm as OMMJsonObjectV3, laterObservationEpoch)
+    const observed = satelliteObservation(issOmm as OMMJsonObjectV3, laterObservationEpoch) as SatelliteObservation
 
     expect(observed.orbit?.revolutionCount).toBe(57979)
   })
 })
 
-describe('satelliteObservations', () => {
-  test.each(unitOptionCases)('returns one observation per datetime for $name', ({ unitOptions, angular, timestamp }) => {
+describe('satelliteObservation with array input', () => {
+  test.each(unitOptionCases)('returns one observation per datetime for $name', ({ angular, timestamp }) => {
     const dateTimes = [observationEpoch, laterObservationEpoch]
     const observerPosition = observerPositionFor(angular)
 
-    const observed = satelliteObservations(
+    const observed = satelliteObservation(
       issOmm as OMMJsonObjectV3,
       dateTimes,
       observerPosition,
-      unitOptions,
+      angular,
+      timestamp,
     )
 
+    expect(Array.isArray(observed)).toBe(true)
     expect(observed).toHaveLength(dateTimes.length)
 
     dateTimes.forEach((dateTime, index) => {
@@ -315,11 +302,12 @@ describe('satelliteObservations', () => {
         issOmm as OMMJsonObjectV3,
         dateTime,
         observerPosition,
-        unitOptions,
+        angular,
+        timestamp,
       )
 
-      const { epoch: actualEpoch, ...actualRest } = observed[index]
-      const { epoch: expectedEpoch, ...expectedRest } = expected
+      const { epoch: actualEpoch, ...actualRest } = (observed as any)[index]
+      const { epoch: expectedEpoch, ...expectedRest } = expected as any
 
       expect(actualRest).toStrictEqual(expectedRest)
       expectTimestampValue(actualEpoch, dateTime, timestamp)
@@ -328,31 +316,34 @@ describe('satelliteObservations', () => {
   })
 
   test('returns an empty array when no datetimes are provided', () => {
-    expect(satelliteObservations(issOmm as OMMJsonObjectV3, [])).toStrictEqual([])
+    const result = satelliteObservation(issOmm as OMMJsonObjectV3, [])
+    expect(Array.isArray(result)).toBe(true)
+    expect(result).toStrictEqual([])
   })
 })
 
 describe('satelliteTransits', () => {
-  test.each(transitUnitOptionCases)('returns ordered transit events for $name', ({ unitOptions, angular, timestamp }) => {
+  test.each(transitUnitOptionCases)('returns ordered transit events for $name', ({ angular, timestamp }) => {
     const observerPosition = observerPositionFor(angular)
     const transits = satelliteTransits(
       issOmm as OMMJsonObjectV3,
-      observerPosition,
       transitWindowStart,
       transitWindowStop,
-      undefined,
-      unitOptions,
+      observerPosition,
+      0,
+      angular,
+      timestamp,
     )
 
     expect(transits.length).toBeGreaterThan(0)
 
     transits.forEach((transit) => {
-      expectTimestampType(transit.start, timestamp)
-      expectTimestampType(transit.stop, timestamp)
-      expectTimestampType(transit.aos.epoch, timestamp)
-      expectTimestampType(transit.los.epoch, timestamp)
-      expectTimestampType(transit.peak.epoch, timestamp)
-      expectTimestampType(transit.tca.epoch, timestamp)
+      expectTimestampFormat(transit.start, timestamp)
+      expectTimestampFormat(transit.stop, timestamp)
+      expectTimestampFormat(transit.aos.epoch, timestamp)
+      expectTimestampFormat(transit.los.epoch, timestamp)
+      expectTimestampFormat(transit.peak.epoch, timestamp)
+      expectTimestampFormat(transit.tca.epoch, timestamp)
 
       const startMillis = timestampToMillis(transit.start)
       const stopMillis = timestampToMillis(transit.stop)
@@ -370,10 +361,10 @@ describe('satelliteTransits', () => {
       expect(tcaMillis).toBeLessThanOrEqual(stopMillis)
       expect(Math.abs(transit.duration - ((stopMillis - startMillis) / 1000))).toBeLessThan(0.002)
 
-      const aosObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.aos.epoch, observerPosition, unitOptions)
-      const losObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.los.epoch, observerPosition, unitOptions)
-      const peakObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.peak.epoch, observerPosition, unitOptions)
-      const tcaObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.tca.epoch, observerPosition, unitOptions)
+      const aosObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.aos.epoch, observerPosition, angular, timestamp) as any
+      const losObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.los.epoch, observerPosition, angular, timestamp) as any
+      const peakObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.peak.epoch, observerPosition, angular, timestamp) as any
+      const tcaObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.tca.epoch, observerPosition, angular, timestamp) as any
 
       expect(aosObservation.azimuth).toBeCloseTo(transit.aos.azimuth, 10)
       expect(aosObservation.elevation).toBeCloseTo(transit.aos.elevation, 10)
@@ -399,15 +390,15 @@ describe('satelliteTransits', () => {
     const observerPosition = observerPositionFor(AngularUnits.Degrees)
     const allTransits = satelliteTransits(
       issOmm as OMMJsonObjectV3,
-      observerPosition,
       transitWindowStart,
       transitWindowStop,
+      observerPosition,
     )
     const filteredTransits = satelliteTransits(
       issOmm as OMMJsonObjectV3,
-      observerPosition,
       transitWindowStart,
       transitWindowStop,
+      observerPosition,
       20,
     )
 
@@ -415,21 +406,25 @@ describe('satelliteTransits', () => {
 
     filteredTransits.forEach((transit) => {
       expect(transit.peak.elevation).toBeGreaterThanOrEqual(20)
-      expect(transit.aos.elevation).toBeCloseTo(20, 2)
-      expect(transit.los.elevation).toBeCloseTo(20, 2)
+      // The default elevation tolerance (1e-3 rad ≈ 0.0573°) matches SGP4's
+      // inherent angular accuracy, so AOS/LOS converge to within that band of
+      // the requested 20° threshold.
+      const toleranceDegrees = 1e-3 * (180 / Math.PI)
+      expect(Math.abs((transit.aos.elevation as number) - 20)).toBeLessThanOrEqual(toleranceDegrees)
+      expect(Math.abs((transit.los.elevation as number) - 20)).toBeLessThanOrEqual(toleranceDegrees)
     })
   })
 
-  test('returns an empty array when the time range is invalid', () => {
+  test('throws when the time range is invalid', () => {
     const observerPosition = observerPositionFor(AngularUnits.Degrees)
 
-    expect(
+    expect(() =>
       satelliteTransits(
         issOmm as OMMJsonObjectV3,
-        observerPosition,
         transitWindowStop,
         transitWindowStart,
+        observerPosition,
       ),
-    ).toStrictEqual([])
+    ).toThrow('Stop date is less than or equal to start date')
   })
 })

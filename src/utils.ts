@@ -1,11 +1,10 @@
 import { DateTime } from "luxon";
-import { Position, SatelliteObservation, TransitEvent, UnitOptions, Velocity } from "./interfaces.ts";
+import { Position, SatelliteObservation, TransitEvent, Velocity } from "./interfaces.ts";
 import { WGS84, astronomicalUnit, day2ms, geostationaryMeanMotion, geostationaryTolerance, rad2deg } from "./constants.ts";
-import type { Degrees, Kilometers, Radians, Timestamp } from "./types.ts";
+import type { Seconds, Timestamp } from "./types.ts";
 import { TwoLineElement, OrbitMeanElementsMessage } from "./types.ts";
-import { AngularUnits, TimestampType } from "./enums.ts";
+import { AngularUnits, TimestampFormat } from "./enums.ts";
 import {
-  dopplerFactor,
   ecfToLookAngles,
   gstime,
   jday,
@@ -26,6 +25,10 @@ import {
   MeanElements,
   shadowFraction,
   sunPos,
+  Kilometer,
+  KilometerPerSecond,
+  EcfVec3,
+  Radians,
 } from "satellite.js";
 
 // <--------------------------------------------------------------------------->
@@ -35,11 +38,53 @@ import {
 /**
  * Calculate the maginture of the vector
  * @param vector 
- * @returns 
+ * @returns number
  */
 export function vectorMagnitude(vector: { x: number; y: number; z: number }): number {
   return Math.hypot(vector.x, vector.y, vector.z)
 }
+
+/**
+ * Convert a Julian date to a luxon DateTime object
+ * @param julianDate the julian date number
+ * @returns DateTime
+ */
+export function dateTimeFromJulianDate(julianDate: number): DateTime {
+  // 2440587.5 is the Julian Date for 1970-01-01T00:00:00Z (Unix Epoch)
+  const msSinceEpoch = (julianDate - 2440587.5) * 86400000;
+  return DateTime.fromMillis(msSinceEpoch, { zone: 'utc' });
+}
+
+/**
+ * Calculate the doppler factor between the observer and the satellite
+ */
+ // Calculate doppler factor using ECEF coordinates
+ export function dopplerFactorEcf(
+   observerCoordsEcf: EcfVec3<Kilometer>,
+   positionEcf: EcfVec3<Kilometer>,
+   velocityEcf: EcfVec3<KilometerPerSecond>,
+ ): number {
+   const c = 299792.458; // Speed of light in km/s
+   
+   // 1. Calculate the line-of-sight range vector from observer to satellite
+   const rangeX = positionEcf.x - observerCoordsEcf.x;
+   const rangeY = positionEcf.y - observerCoordsEcf.y;
+   const rangeZ = positionEcf.z - observerCoordsEcf.z;
+   
+   // 2. Calculate slant range distance
+   const length = Math.sqrt(rangeX ** 2 + rangeY ** 2 + rangeZ ** 2);
+ 
+   // Avoid division by zero if observer and satellite positions are identical
+   if (length === 0) return 1;
+ 
+   // 3. Range rate is the dot product of the range vector and relative ECEF velocity vector
+   // (Since observer velocity is 0 in ECEF, rangeVel is exactly velocityEcf)
+   const rangeRate =
+     (rangeX * velocityEcf.x + rangeY * velocityEcf.y + rangeZ * velocityEcf.z) / length;
+ 
+   // 4. Return Doppler multiplier factor
+   return 1 - rangeRate / c;
+ }
 
 /**
  * Determine whether a satellite is in a geostationary orbit from its
@@ -113,7 +158,7 @@ export function betaAngle(
  * based on a WGS84 ellipsoid.
  * @param latitude sub-satellite point (SSP) latitude in radians.
  */
-export function localEarthRadius(latitude: Radians): Kilometers {
+export function localEarthRadius(latitude: Radians): Kilometer {
   const re = WGS84.a / Math.sqrt((1 - WGS84.e2 * Math.pow(Math.sin(latitude), 2)));
   return re;
 }
@@ -124,7 +169,7 @@ export function localEarthRadius(latitude: Radians): Kilometers {
  * @param altitude satellite altitude (kilometers)
  * @param minElevationAngle minimum elevation angle (radians)
  */
-export function earthCentralAngle(re: Kilometers, altitude: Kilometers, minElevationAngle: Radians = 0.0): Radians {
+export function earthCentralAngle(re: Kilometer, altitude: Kilometer, minElevationAngle: Radians = 0.0): Radians {
   const lambda = Math.acos((re / (re + altitude)) * Math.cos(minElevationAngle)) - minElevationAngle
   return lambda
 }
@@ -135,7 +180,7 @@ export function earthCentralAngle(re: Kilometers, altitude: Kilometers, minEleva
  * @param altitude satellite altitude (kilometers)
  * @param minElevationAngle minimum elevation angle (radians)
  */
- export function footprintDiameter(satPosition: Position, minElevationAngle: Radians = 0.0): Kilometers {
+ export function footprintDiameter(satPosition: Position, minElevationAngle: Radians = 0.0): Kilometer {
    const re = localEarthRadius(satPosition.geo!.latitude);
    const lambda = earthCentralAngle(re, satPosition.geo!.height, minElevationAngle)
    const footprint = re * lambda * 2
@@ -457,30 +502,24 @@ export function convertGeodeticToDegrees(position: Position): Position {
 /**
  * Convert a luxon DateTime object to the format specified by the timestamp type
  */
-export function formatTimestamp(datetime: DateTime, timestampType: TimestampType): Timestamp {
-  switch (timestampType) {
+export function formatTimestamp(datetime: DateTime, timestampFormat: TimestampFormat): Timestamp {
+  switch (timestampFormat) {
     /** Return the luxon DateTime object unmodified */
-    case TimestampType.DateTime:
+    case TimestampFormat.DateTime:
       return datetime;
 
     /** Return standard Javascript Date object */
-    case TimestampType.Date:
+    case TimestampFormat.Date:
       return datetime.toJSDate()
 
     /** Return ISO8601 formatted timestamp string */
-    case TimestampType.ISO8601:
+    case TimestampFormat.ISO8601:
       return datetime.toISO()!
 
     /** Return the number of milliseconds since Unix epoch */
-    case TimestampType.Unix:
+    case TimestampFormat.Unix:
       return datetime.toMillis()
   }
-}
-
-/** Define the default unit options for the propagation functions. */
-export const defaultUnitOptions: UnitOptions = {
-  angular: AngularUnits.Degrees,
-  timestamp: TimestampType.ISO8601,
 }
 
 export function computeSatelliteObservation(
@@ -488,10 +527,9 @@ export function computeSatelliteObservation(
   satrec: SatRec,
   datetime: DateTime,
   observerPosition?: Position,
-  unitOptions?: UnitOptions,
+  angularUnits: AngularUnits = AngularUnits.Degrees,
+  timestampFormat: TimestampFormat = TimestampFormat.ISO8601
 ): SatelliteObservation {
-  const unitOpts: UnitOptions = { ...defaultUnitOptions, ...(unitOptions ?? {}) }
-
   // Returns the satellite position and velocity in ECI coordinations
   const satPropagation = propagate(satrec, datetime.toJSDate())
 
@@ -508,7 +546,7 @@ export function computeSatelliteObservation(
         throw new Error('Predicted orbit eccentricity is out of range for SGP4 propagation model')
 
       case SatRecError.SemiLatusRectumBelowZero:
-        throw new Error('Predicted orbit has collapsed mathematically')
+        throw new Error('Predicted orbit has mathematically collapsed')
 
       case SatRecError.Decayed:
         return {
@@ -516,7 +554,7 @@ export function computeSatelliteObservation(
           name: omm.OBJECT_NAME,
           noradCatalogId: omm.NORAD_CAT_ID as string,
           orbitalModel: omm.MEAN_ELEMENT_THEORY,
-          epoch: formatTimestamp(datetime, unitOpts.timestamp!),
+          epoch: formatTimestamp(datetime, timestampFormat),
           decayed: true,
         }
     }
@@ -527,7 +565,7 @@ export function computeSatelliteObservation(
   const gmst = greenwichMeanSiderealTime(datetime)
 
   // Calculate the satellite's position and velocity in other coordinate frames
-  const satPosition = inferPosition({ eci: satPropagation.position }, gmst, unitOpts.angular!)
+  const satPosition = inferPosition({ eci: satPropagation.position }, gmst, angularUnits)
   const satVelocity = inferVelocity({ eci: satPropagation.velocity }, gmst)
 
   // Calculate the sun's position in kilometers
@@ -537,7 +575,7 @@ export function computeSatelliteObservation(
     y: sunEciAU.y * astronomicalUnit,
     z: sunEciAU.z * astronomicalUnit,
   }
-  const sunPosition = inferPosition({ eci: sunEci }, gmst, unitOpts.angular!)
+  const sunPosition = inferPosition({ eci: sunEci }, gmst, angularUnits)
 
   // Calculate the eclipse factor
   const eclipseFactor = shadowFraction(sunEciAU, satPosition.eci!)
@@ -560,22 +598,22 @@ export function computeSatelliteObservation(
     name: omm.OBJECT_NAME,
     noradCatalogId: omm.NORAD_CAT_ID as string,
     orbitalModel: omm.MEAN_ELEMENT_THEORY,
-    epoch: formatTimestamp(datetime, unitOpts.timestamp!),
+    epoch: formatTimestamp(datetime, timestampFormat),
     gmst,
-    position: unitOpts.angular === AngularUnits.Degrees ? convertGeodeticToDegrees(satPosition) : satPosition,
+    position: angularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(satPosition) : satPosition,
     velocity: satVelocity,
     footprint,
     orbit: {
       revolutionCount: predictedRevolutionCount(omm, datetime),
-      phase: unitOpts.angular === AngularUnits.Degrees ? phaseRadians * rad2deg : phaseRadians,
+      phase: angularUnits === AngularUnits.Degrees ? phaseRadians * rad2deg : phaseRadians,
       phase256: phaseRadians * (256 / twoPi),
       velocity: vectorMagnitude(satVelocity.eci!),
     },
     decayed: false,
     geostationary: isGeostationary(satPropagation.meanElements),
     sunlit: eclipseFactor < 1,
-    sunPosition: unitOpts.angular === AngularUnits.Degrees ? convertGeodeticToDegrees(sunPosition) : sunPosition,
-    betaAngle: unitOpts.angular === AngularUnits.Degrees ? betaAngleRadians * rad2deg : betaAngleRadians,
+    sunPosition: angularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(sunPosition) : sunPosition,
+    betaAngle: angularUnits === AngularUnits.Degrees ? betaAngleRadians * rad2deg : betaAngleRadians,
     eclipseFactor,
   }
 
@@ -584,117 +622,425 @@ export function computeSatelliteObservation(
   }
 
   // If we have an observer, calculate the look angles of the satellite
-  const observerInferedPosition = inferPosition(observerPosition, gmst, unitOpts.angular!)
+  const observerInferedPosition = inferPosition(observerPosition, gmst, angularUnits)
   const observerLookAngles = ecfToLookAngles(observerInferedPosition.geo!, satPosition.ecef!)
 
   return {
     ...observation,
-    observerPosition: unitOpts.angular === AngularUnits.Degrees
+    observerPosition: angularUnits === AngularUnits.Degrees
       ? convertGeodeticToDegrees(observerInferedPosition)
       : observerInferedPosition,
-    azimuth: unitOpts.angular === AngularUnits.Degrees
+    azimuth: angularUnits === AngularUnits.Degrees
       ? radiansToDegrees(observerLookAngles.azimuth)
       : observerLookAngles.azimuth,
-    elevation: unitOpts.angular === AngularUnits.Degrees
+    elevation: angularUnits === AngularUnits.Degrees
       ? radiansToDegrees(observerLookAngles.elevation)
       : observerLookAngles.elevation,
     slantRange: observerLookAngles.rangeSat,
-    dopplerFactor: dopplerFactor(observerInferedPosition.ecef!, satPosition.ecef!, satVelocity.ecef!),
+    dopplerFactor: dopplerFactorEcf(observerInferedPosition.ecef!, satPosition.ecef!, satVelocity.ecef!),
   }
 }
 
-export function transitObservation(
-  omm: OrbitMeanElementsMessage,
-  satrec: SatRec,
-  datetime: DateTime,
-  observerPosition: Position,
-  angularUnits: AngularUnits,
-): SatelliteObservation {
-  return computeSatelliteObservation(omm, satrec, datetime, observerPosition, {
-    angular: angularUnits,
-    timestamp: TimestampType.DateTime,
-  })
-}
-
-export function isVisible(observation: SatelliteObservation, minElevation: Degrees | Radians): boolean {
-  return !observation.decayed && (observation.elevation ?? -Infinity) >= minElevation
-}
-
-export function toDateTime(milliseconds: number): DateTime {
-  return DateTime.fromMillis(milliseconds, { zone: 'UTC' })
-}
-
-export function refineHorizonCrossing(
-  startTime: DateTime,
-  startObservation: SatelliteObservation,
-  endTime: DateTime,
-  endObservation: SatelliteObservation,
-  minElevation: Degrees | Radians,
-  observeAt: (datetime: DateTime) => SatelliteObservation,
-  iterations: number,
-): { time: DateTime; observation: SatelliteObservation } {
-  let lowTime = startTime
-  let highTime = endTime
-  let lowObservation = startObservation
-  let highObservation = endObservation
-  const lowVisible = isVisible(startObservation, minElevation)
-
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const midpoint = toDateTime((lowTime.toMillis() + highTime.toMillis()) / 2)
-    const midpointObservation = observeAt(midpoint)
-
-    if (isVisible(midpointObservation, minElevation) === lowVisible) {
-      lowTime = midpoint
-      lowObservation = midpointObservation
-    } else {
-      highTime = midpoint
-      highObservation = midpointObservation
-    }
-  }
-
-  return Math.abs((lowObservation.elevation ?? 0) - minElevation) < Math.abs((highObservation.elevation ?? 0) - minElevation)
-    ? { time: lowTime, observation: lowObservation }
-    : { time: highTime, observation: highObservation }
-}
-
-export function refineTransitExtremum(
-  startTime: DateTime,
-  endTime: DateTime,
-  observeAt: (datetime: DateTime) => SatelliteObservation,
-  score: (observation: SatelliteObservation) => number,
-  maximize: boolean,
-  iterations: number,
-): { time: DateTime; observation: SatelliteObservation } {
-  let left = startTime.toMillis()
-  let right = endTime.toMillis()
-
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const oneThird = (right - left) / 3
-    const firstMid = left + oneThird
-    const secondMid = right - oneThird
-    const firstScore = score(observeAt(toDateTime(firstMid)))
-    const secondScore = score(observeAt(toDateTime(secondMid)))
-
-    if ((maximize && firstScore < secondScore) || (!maximize && firstScore > secondScore)) {
-      left = firstMid
-    } else {
-      right = secondMid
-    }
-  }
-
-  const midpoint = toDateTime((left + right) / 2)
-  return { time: midpoint, observation: observeAt(midpoint) }
-}
-
+/**
+ * Build and return a satellite transit event 
+ * @param epoch 
+ * @param elevation 
+ * @param azimuch 
+ */
 export function buildTransitEvent(
-  time: DateTime,
-  observation: SatelliteObservation,
-  timestampType: TimestampType,
+  observation: SatelliteObservation
 ): TransitEvent {
   return {
-    epoch: formatTimestamp(time, timestampType),
-    azimuth: observation.azimuth!,
+    epoch: observation.epoch!,
     elevation: observation.elevation!,
+    azimuth: observation.azimuth!,
     slantRange: observation.slantRange!,
+    dopplerFactor: observation.dopplerFactor!
+  }
+}
+
+// <--------------------------------------------------------------------------->
+// TRANSIT SEARCH HELPERS
+//
+// The transit search follows the same two-phase strategy used by Python's
+// Skyfield library:
+//   1. A *coarse* search samples the satellite's look angles at a fixed step
+//      over each orbit to bracket candidate events (rise/set zero-crossings of
+//      elevation, and elevation maxima found via the sign of the elevation
+//      rate).
+//   2. A *fine* refinement uses the secant method to converge on the exact
+//      event time within a configurable tolerance and iteration budget.
+// <--------------------------------------------------------------------------->
+
+/**
+ * Derive the coarse-search step size (in seconds) from the satellite's mean
+ * motion, mirroring Skyfield's `find_events` heuristic.
+ *
+ * Skyfield samples roughly 20 times per orbital revolution
+ * (`step_days = 0.05 / orbits_per_day`), which keeps the step well under a
+ * single pass so every culmination is bracketed by adjacent samples, while
+ * scaling naturally across orbit regimes (faster LEO -> finer step, slower
+ * orbits -> coarser step). The step is capped at a quarter day so very slow
+ * (near-geostationary) satellites — which rise and set because the Earth
+ * rotates beneath them rather than from their own motion — are still sampled
+ * often enough to catch each pass.
+ *
+ * @param meanMotionRevsPerDay the satellite's mean motion in revolutions per day
+ * @returns the coarse-search step size in seconds
+ */
+export function dynamicStepSeconds(meanMotionRevsPerDay: number): Seconds {
+  const secondsPerDay = 86400
+
+  // Guard against zero/negative/NaN mean motion so the step never blows up.
+  const orbitsPerDay = meanMotionRevsPerDay > 0 ? meanMotionRevsPerDay : 1.0
+
+  // ~20 samples per revolution (0.05 of an orbit per sample).
+  let stepDays = 0.05 / orbitsPerDay
+
+  // Never step more coarsely than a quarter day, even for slow movers.
+  if (stepDays > 0.25) {
+    stepDays = 0.25
+  }
+
+  return stepDays * secondsPerDay
+}
+
+/**
+ * Compute the satellite's elevation angle (radians) above the observer's local
+ * horizon at a given instant.
+ *
+ * This is the fundamental scalar function that the coarse search and the secant
+ * refinement both evaluate. It propagates the satellite with SGP4, converts the
+ * ECI position to the Earth-fixed frame using the sidereal time at that
+ * instant, and returns the topocentric elevation angle relative to the
+ * observer's geodetic position (which is expressed in radians).
+ *
+ * The instant is passed as milliseconds since the Unix epoch so the transit
+ * search can perform all of its arithmetic in a single linear numeric unit
+ * without constructing intermediate luxon `DateTime` objects.
+ *
+ * @param satrec the initialized SGP4 record for the satellite
+ * @param observerGeodeticRadians the observer's geodetic location in radians
+ * @param epochMs the instant at which to evaluate the elevation, in epoch ms
+ * @returns the elevation angle in radians (negative when below the horizon)
+ */
+export function elevationAt(
+  satrec: SatRec,
+  observerGeodeticRadians: GeodeticLocation,
+  epochMs: number,
+): Radians {
+  const date = new Date(epochMs)
+  const propagation = propagate(satrec, date)
+
+  // If SGP4 cannot produce a position (e.g. the orbit has decayed) treat the
+  // satellite as being infinitely far below the horizon so it never registers
+  // as a pass.
+  if (propagation === null) {
+    return Number.NEGATIVE_INFINITY
+  }
+
+  const gmst = gstime(date)
+  const positionEcf = eciToEcf(propagation.position, gmst)
+  const lookAngles = ecfToLookAngles(observerGeodeticRadians, positionEcf)
+
+  return lookAngles.elevation
+}
+
+/**
+ * Compute the elevation angle *relative to a reference elevation*, i.e.
+ * `elevation(t) - referenceElevation`. This shifted function crosses zero
+ * exactly when the satellite passes through the reference elevation, which lets
+ * the same secant root-finder locate both horizon (0 rad) crossings and
+ * minimum-elevation (AOS/LOS) crossings.
+ *
+ * @param satrec the initialized SGP4 record for the satellite
+ * @param observerGeodeticRadians the observer's geodetic location in radians
+ * @param epochMs the instant at which to evaluate the elevation, in epoch ms
+ * @param referenceElevation the elevation offset to subtract, in radians
+ * @returns elevation(epochMs) - referenceElevation, in radians
+ */
+export function elevationRelativeTo(
+  satrec: SatRec,
+  observerGeodeticRadians: GeodeticLocation,
+  epochMs: number,
+  referenceElevation: Radians,
+): Radians {
+  return elevationAt(satrec, observerGeodeticRadians, epochMs) - referenceElevation
+}
+
+/**
+ * Refine the time at which a scalar function of time crosses zero, using a
+ * bracketed secant method (secant steps with a bisection fallback).
+ *
+ * The plain secant method draws a line through the two most recent samples and
+ * takes its x-intercept as the next estimate:
+ *
+ *   t_{n+1} = t_n - f(t_n) * (t_n - t_{n-1}) / (f(t_n) - f(t_{n-1}))
+ *
+ * That extrapolating step can, however, jump far outside the starting interval
+ * when the function is not locally linear — landing on a completely different
+ * root (e.g. the rise/set of a neighbouring pass). To stay robust, this routine
+ * maintains a bracket `[lo, hi]` whose endpoints straddle the crossing
+ * (`f(lo)` and `f(hi)` have opposite signs) and only accepts a secant iterate
+ * that falls strictly inside the bracket; otherwise it falls back to the
+ * bracket midpoint (bisection). The bracket is then tightened using the sign of
+ * the new sample, so the search can never escape the interval `[aMs, bMs]`.
+ *
+ * `f` is the target quantity offset from its crossing value — for example
+ * `elevation(t) - referenceElevation` for a rise/set/horizon event — so the
+ * root is exactly the crossing time. All times are milliseconds since the Unix
+ * epoch, so the arithmetic stays in a single linear unit and no intermediate
+ * `DateTime` objects are constructed.
+ *
+ * The endpoints `aMs` and `bMs` MUST straddle the crossing (their `f` values
+ * must have opposite signs); this is guaranteed at every call site because each
+ * bracket pairs a coarse sample below the threshold with the pass peak above it.
+ *
+ * Convergence is judged on the *value* of `f`: iteration stops once
+ * `|f(t)| <= valueTolerance`, meaning the quantity is within `valueTolerance`
+ * of its crossing value (e.g. within 1e-3 radians of the elevation crossing).
+ * If `maxIterations` is exhausted the best estimate found so far is returned.
+ *
+ * @param f the scalar function whose zero we are seeking, evaluated at epoch ms
+ * @param aMs one bracketing time, in epoch milliseconds
+ * @param bMs the other bracketing time, in epoch milliseconds
+ * @param valueTolerance convergence tolerance on `|f(t)|`, in the units of `f`
+ * @param maxIterations maximum number of secant iterations before giving up
+ * @returns the refined crossing time, in epoch milliseconds
+ */
+export function secantMethod(
+  f: (epochMs: number) => number,
+  aMs: number,
+  bMs: number,
+  valueTolerance: number,
+  maxIterations: number,
+): number {
+  // Bracket endpoints and their function values. `lo`/`hi` are ordered in time
+  // but, more importantly, f(lo) and f(hi) must have opposite signs.
+  let lo = aMs
+  let hi = bMs
+  let fLo = f(lo)
+  let fHi = f(hi)
+
+  // Either endpoint may already be within tolerance of the crossing.
+  if (Math.abs(fLo) <= valueTolerance) {
+    return lo
+  }
+  if (Math.abs(fHi) <= valueTolerance) {
+    return hi
+  }
+
+  // Track the two most recent samples for the secant step.
+  let t0 = lo
+  let t1 = hi
+  let f0 = fLo
+  let f1 = fHi
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const denominator = f1 - f0
+
+    // Secant update, unless the line is flat (denominator 0), in which case the
+    // step is undefined and we fall straight through to the bisection fallback.
+    let t2 = denominator === 0 ? NaN : t1 - f1 * (t1 - t0) / denominator
+
+    // Reject secant iterates that leave the bracket (or are non-finite) and
+    // fall back to bisection, which is guaranteed to stay inside and converge.
+    const lower = Math.min(lo, hi)
+    const upper = Math.max(lo, hi)
+    if (!Number.isFinite(t2) || t2 <= lower || t2 >= upper) {
+      t2 = (lo + hi) / 2
+    }
+
+    const f2 = f(t2)
+
+    // Converged once the target quantity is within tolerance of its crossing.
+    if (Math.abs(f2) <= valueTolerance) {
+      return t2
+    }
+
+    // Tighten the bracket: replace the endpoint on the same side of the root as
+    // the new sample, preserving the opposite-sign invariant.
+    if ((f2 < 0) === (fLo < 0)) {
+      lo = t2
+      fLo = f2
+    } else {
+      hi = t2
+      fHi = f2
+    }
+
+    // Advance the secant window to the two newest in-bracket samples.
+    t0 = t1
+    f0 = f1
+    t1 = t2
+    f1 = f2
+  }
+
+  // Did not converge within the iteration budget; return the latest estimate.
+  return t1
+}
+
+/**
+ * Refine the time at which a scalar function of time reaches a local extremum
+ * (maximum or minimum) using a bracketed secant method on the function's *rate*.
+ *
+ * An extremum occurs where the derivative `f'(t) = 0`, so the secant method is
+ * applied to a finite-difference estimate of the rate to drive it toward zero.
+ * As with {@link secantMethod}, a plain secant step can extrapolate outside the
+ * starting interval and converge on a different extremum; to prevent that, this
+ * routine keeps a bracket `[lo, hi]` whose rate values straddle zero and rejects
+ * any secant iterate that leaves the bracket, falling back to bisection. The
+ * bracket is tightened by the sign of each new rate sample so the search stays
+ * within `[aMs, bMs]`.
+ *
+ * The endpoints `aMs` and `bMs` MUST straddle the extremum (their rate values
+ * must have opposite signs); every call site guarantees this by locating the
+ * coarse interval where the rate flips sign before refining.
+ *
+ * Convergence is judged on the rate itself: iteration stops once
+ * `|rate(t)| <= rateTolerance`, meaning the derivative is within `rateTolerance`
+ * of zero (e.g. the elevation rate is within a small rad/s of the peak, or the
+ * range rate is within a small km/s of the closest approach). If
+ * `maxIterations` is exhausted the best estimate found so far is returned.
+ *
+ * Times are milliseconds since the Unix epoch, while the `rate` callback is
+ * expected to return the derivative in per-second units.
+ *
+ * @param rate a finite-difference estimate of d(value)/dt, evaluated at epoch ms
+ * @param aMs one bracketing time, in epoch milliseconds
+ * @param bMs the other bracketing time, in epoch milliseconds
+ * @param rateTolerance convergence tolerance on `|rate(t)|`, in the units of `rate`
+ * @param maxIterations maximum number of secant iterations before giving up
+ * @returns the refined extremum time, in epoch milliseconds
+ */
+export function secantExtremum(
+  rate: (epochMs: number) => number,
+  aMs: number,
+  bMs: number,
+  rateTolerance: number,
+  maxIterations: number,
+): number {
+  // Bracket endpoints whose rate values straddle zero (opposite signs).
+  let lo = aMs
+  let hi = bMs
+  let rLo = rate(lo)
+  let rHi = rate(hi)
+
+  // Either endpoint may already be within tolerance of the extremum.
+  if (Math.abs(rLo) <= rateTolerance) {
+    return lo
+  }
+  if (Math.abs(rHi) <= rateTolerance) {
+    return hi
+  }
+
+  // Track the two most recent samples for the secant step.
+  let t0 = lo
+  let t1 = hi
+  let r0 = rLo
+  let r1 = rHi
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const denominator = r1 - r0
+
+    // Secant update on the rate, unless the line is flat (undefined step).
+    let t2 = denominator === 0 ? NaN : t1 - r1 * (t1 - t0) / denominator
+
+    // Reject iterates that leave the bracket (or are non-finite); bisect instead.
+    const lower = Math.min(lo, hi)
+    const upper = Math.max(lo, hi)
+    if (!Number.isFinite(t2) || t2 <= lower || t2 >= upper) {
+      t2 = (lo + hi) / 2
+    }
+
+    const r2 = rate(t2)
+
+    // Converged once the rate of change is within tolerance of zero.
+    if (Math.abs(r2) <= rateTolerance) {
+      return t2
+    }
+
+    // Tighten the bracket, preserving the opposite-sign invariant on the rate.
+    if ((r2 < 0) === (rLo < 0)) {
+      lo = t2
+      rLo = r2
+    } else {
+      hi = t2
+      rHi = r2
+    }
+
+    // Advance the secant window.
+    t0 = t1
+    r0 = r1
+    t1 = t2
+    r1 = r2
+  }
+
+  // Did not converge within the iteration budget; return the latest estimate.
+  return t1
+}
+
+/**
+ * Locate the horizon (0-radian elevation) crossing for a single pass by
+ * marching outward from a known event time (AOS or LOS) until the elevation
+ * drops below the horizon, then refining the crossing with the secant method.
+ *
+ * At AOS/LOS the elevation equals the (non-negative) minimum elevation, so
+ * marching *away* from the pass the elevation decreases monotonically toward and
+ * then below 0 rad. Once a below-horizon sample is found it is paired with the
+ * pass's peak time (which is guaranteed above the horizon) to form a bracket
+ * that straddles exactly one crossing — the one belonging to this pass — before
+ * the secant method refines it. When the minimum elevation is 0 the crossing
+ * coincides with the anchor to within tolerance.
+ *
+ * The march is bounded by the search window; if the horizon is never crossed
+ * inside the window the anchor time is returned as a safe fallback.
+ *
+ * @param satrec initialized SGP4 record
+ * @param observerGeodeticRadians observer geodetic position in radians
+ * @param anchorMs the AOS or LOS time to march away from, in epoch milliseconds
+ * @param peakMs the pass's culmination time (always above the horizon), in epoch ms
+ * @param stepMs signed march increment in milliseconds (negative marches backward)
+ * @param startMs lower bound of the search window in epoch milliseconds
+ * @param stopMs upper bound of the search window in epoch milliseconds
+ * @param elevationToleranceRadians secant convergence tolerance in radians
+ * @param maxIterations secant iteration limit
+ * @returns the refined horizon-crossing time, in epoch milliseconds
+ */
+export function findHorizonCrossing(
+  satrec: SatRec,
+  observerGeodeticRadians: GeodeticLocation,
+  anchorMs: number,
+  peakMs: number,
+  stepMs: number,
+  startMs: number,
+  stopMs: number,
+  elevationToleranceRadians: number,
+  maxIterations: number,
+): number {
+  let outerMs = anchorMs
+
+  // March outward until the elevation is below the horizon.
+  while (true) {
+    const elevationOuter = elevationAt(satrec, observerGeodeticRadians, outerMs)
+    if (elevationOuter < 0) {
+      // Bracket the crossing between the peak (above horizon) and this
+      // below-horizon point, then refine.
+      return secantMethod(
+        (ms) => elevationRelativeTo(satrec, observerGeodeticRadians, ms, 0),
+        peakMs,
+        outerMs,
+        elevationToleranceRadians,
+        maxIterations,
+      )
+    }
+
+    const nextMs = outerMs + stepMs
+
+    // Stop marching at the window edge; return the anchor as a safe fallback.
+    if (nextMs < startMs || nextMs > stopMs) {
+      return anchorMs
+    }
+
+    outerMs = nextMs
   }
 }

@@ -1,10 +1,11 @@
-import { Kilometers, AstronomialUnits } from "./types";
+import { AstronomialUnits } from "./types";
+import { Kilometer } from "satellite.js";
 
 /** Astronomical Unit - km (IAU 76) */
 export const astronomicalUnit: AstronomialUnits = 1.49597870691E8;
 
 /** Solar Radius - km (IAU 76) */
-export const solarRadius: Kilometers = 6.96000E5;
+export const solarRadius: Kilometer = 6.96000E5;
 
 /** Convert degrees to radians */
 export const deg2rad: number = Math.PI / 180.0;
