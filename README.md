@@ -125,9 +125,7 @@ interface Position {
 
 You must provide **at least one** frame; supplying none throws
 `At least one set of ECI, ECEF, or Geodetic coordinates must be defined to infer
-position.` Whichever frame you provide, the library computes the other two, so
-the returned `position`, `observerPosition`, and `sunPosition` objects always
-provide all three frames.
+position.` Whichever frame you provide, the library computes the other two.
 
 #### Geodetic (most common)
 
