@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
-import { Position, SatelliteObservation, TransitEvent, Velocity } from "./interfaces.ts";
-import { WGS84, astronomicalUnit, day2ms, geostationaryMeanMotion, geostationaryTolerance, rad2deg } from "./constants.ts";
+import { Position, SatelliteObservation, SatelliteObservationOptions, TransitEvent, Velocity } from "./interfaces.ts";
+import { WGS84, astronomicalUnit, day2ms, defaultSatelliteObservationOptions, geostationaryMeanMotion, geostationaryTolerance, rad2deg } from "./constants.ts";
 import type { Seconds, Timestamp } from "./types.ts";
 import { TwoLineElement, OrbitMeanElementsMessage } from "./types.ts";
 import { AngularUnits, TimestampFormat } from "./enums.ts";
@@ -527,9 +527,11 @@ export function computeSatelliteObservation(
   satrec: SatRec,
   datetime: DateTime,
   observerPosition?: Position,
-  angularUnits: AngularUnits = AngularUnits.Degrees,
-  timestampFormat: TimestampFormat = TimestampFormat.ISO8601
+  satelliteObservationOptions?: SatelliteObservationOptions
 ): SatelliteObservation {
+  // Configure input/output options
+  const options = {...defaultSatelliteObservationOptions, ...satelliteObservationOptions}
+
   // Returns the satellite position and velocity in ECI coordinations
   const satPropagation = propagate(satrec, datetime.toJSDate())
 
@@ -554,7 +556,7 @@ export function computeSatelliteObservation(
           name: omm.OBJECT_NAME,
           noradCatalogId: omm.NORAD_CAT_ID as string,
           orbitalModel: omm.MEAN_ELEMENT_THEORY,
-          epoch: formatTimestamp(datetime, timestampFormat),
+          epoch: formatTimestamp(datetime, options.timestampFormat!),
           decayed: true,
         }
     }
@@ -565,7 +567,7 @@ export function computeSatelliteObservation(
   const gmst = greenwichMeanSiderealTime(datetime)
 
   // Calculate the satellite's position and velocity in other coordinate frames
-  const satPosition = inferPosition({ eci: satPropagation.position }, gmst, angularUnits)
+  const satPosition = inferPosition({ eci: satPropagation.position }, gmst, options.geodeticAngularUnits!)
   const satVelocity = inferVelocity({ eci: satPropagation.velocity }, gmst)
 
   // Calculate the sun's position in kilometers
@@ -575,7 +577,7 @@ export function computeSatelliteObservation(
     y: sunEciAU.y * astronomicalUnit,
     z: sunEciAU.z * astronomicalUnit,
   }
-  const sunPosition = inferPosition({ eci: sunEci }, gmst, angularUnits)
+  const sunPosition = inferPosition({ eci: sunEci }, gmst, options.geodeticAngularUnits!)
 
   // Calculate the eclipse factor
   const eclipseFactor = shadowFraction(sunEciAU, satPosition.eci!)
@@ -598,22 +600,22 @@ export function computeSatelliteObservation(
     name: omm.OBJECT_NAME,
     noradCatalogId: omm.NORAD_CAT_ID as string,
     orbitalModel: omm.MEAN_ELEMENT_THEORY,
-    epoch: formatTimestamp(datetime, timestampFormat),
+    epoch: formatTimestamp(datetime, options.timestampFormat!),
     gmst,
-    position: angularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(satPosition) : satPosition,
+    position: options.geodeticAngularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(satPosition) : satPosition,
     velocity: satVelocity,
     footprint,
     orbit: {
       revolutionCount: predictedRevolutionCount(omm, datetime),
-      phase: angularUnits === AngularUnits.Degrees ? phaseRadians * rad2deg : phaseRadians,
+      phase: options.orbitPhaseAngularUnits === AngularUnits.Degrees ? radiansToDegrees(phaseRadians) : phaseRadians,
       phase256: phaseRadians * (256 / twoPi),
       velocity: vectorMagnitude(satVelocity.eci!),
     },
     decayed: false,
     geostationary: isGeostationary(satPropagation.meanElements),
     sunlit: eclipseFactor < 1,
-    sunPosition: angularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(sunPosition) : sunPosition,
-    betaAngle: angularUnits === AngularUnits.Degrees ? betaAngleRadians * rad2deg : betaAngleRadians,
+    sunPosition: options.geodeticAngularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(sunPosition) : sunPosition,
+    betaAngle: options.betaAngleAngularUnits === AngularUnits.Degrees ? radiansToDegrees(betaAngleRadians) : betaAngleRadians,
     eclipseFactor,
   }
 
@@ -622,18 +624,18 @@ export function computeSatelliteObservation(
   }
 
   // If we have an observer, calculate the look angles of the satellite
-  const observerInferedPosition = inferPosition(observerPosition, gmst, angularUnits)
+  const observerInferedPosition = inferPosition(observerPosition, gmst, options.geodeticAngularUnits!)
   const observerLookAngles = ecfToLookAngles(observerInferedPosition.geo!, satPosition.ecef!)
 
   return {
     ...observation,
-    observerPosition: angularUnits === AngularUnits.Degrees
+    observerPosition: options.geodeticAngularUnits === AngularUnits.Degrees
       ? convertGeodeticToDegrees(observerInferedPosition)
       : observerInferedPosition,
-    azimuth: angularUnits === AngularUnits.Degrees
+    azimuth: options.azimuthAngularUnits === AngularUnits.Degrees
       ? radiansToDegrees(observerLookAngles.azimuth)
       : observerLookAngles.azimuth,
-    elevation: angularUnits === AngularUnits.Degrees
+    elevation: options.elevationAngularUnits === AngularUnits.Degrees
       ? radiansToDegrees(observerLookAngles.elevation)
       : observerLookAngles.elevation,
     slantRange: observerLookAngles.rangeSat,

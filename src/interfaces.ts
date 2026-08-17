@@ -1,5 +1,6 @@
 import { EcfVec3, EciVec3, GeodeticLocation, Radians, Degrees, Kilometer, KilometerPerSecond } from "satellite.js"
 import { Timestamp, Seconds } from "./types.ts"
+import { AngularUnits, TimestampFormat } from "./enums.ts"
 
 /** Position parameters */
 export interface Position {
@@ -171,23 +172,43 @@ export interface SatelliteTransit {
   peak: TransitEvent
 }
 
-/**
- * Tunable precision and convergence controls for the transit search.
- *
- * The transit search first performs a coarse sampling of the satellite's
- * elevation (and elevation rate) over each orbit to bracket candidate events,
- * and then refines each event time using the secant method. These options
- * control how the coarse sampling is stepped and when the secant refinement is
- * considered "converged" or is abandoned.
- *
- * Crossing events (AOS, LOS, and the start/stop horizon crossings) are found by
- * root-finding on the elevation value, so they converge on an angular tolerance
- * in radians. Extremum events (the peak elevation and the time of closest
- * approach) are found by root-finding on the derivative, so they converge on a
- * *rate* tolerance: elevation rate in radians per second, and slant-range rate
- * in kilometers per second.
- */
-export interface TransitSearchOptions {
+export interface SatelliteObservationOptions {
+  /**
+   * Configures the angular units for azimuth angles, options are Degrees or 
+   * Radians.
+   */
+  azimuthAngularUnits?: AngularUnits
+
+  /**
+   * Configures the angular units for elevation angles, options are Degrees or 
+   * Radians.
+   */
+  elevationAngularUnits?: AngularUnits
+
+  /**
+   * Configures the angular units geodetic coordinates are defined in, either
+   * Degress or Radians.
+   */
+  geodeticAngularUnits?: AngularUnits
+
+  /**
+   * Confgures the output format of timestamp fields, options are Unix, ISO8601,
+   * Date, or DateTime objects.
+   */
+  timestampFormat?: TimestampFormat
+
+  /**
+   * Sets the angular units for the beta angle output.
+   */
+  betaAngleAngularUnits?: AngularUnits
+
+  /**
+   * Sets the angular units for the orbit phase outuput.
+   */
+  orbitPhaseAngularUnits?: AngularUnits
+}
+
+export interface SatelliteTransitOptions extends SatelliteObservationOptions {
   /**
    * Angular convergence tolerance in radians for the AOS, LOS, and horizon
    * crossing events. The refinement stops once the satellite's elevation is

@@ -30,12 +30,13 @@
 
 import { AngularUnits, TimestampFormat } from "./enums"
 import { DateTime } from "luxon"
-import { deg2rad } from "./constants"
+import { defaultSatelliteTransitOptions, deg2rad } from "./constants"
 import {
   Position,
   SatelliteObservation,
+  SatelliteObservationOptions,
   SatelliteTransit,
-  TransitSearchOptions,
+  SatelliteTransitOptions,
 } from "./interfaces"
 import {
   OrbitMeanElementsMessage,
@@ -70,10 +71,6 @@ import {
  *    Javascript Date object, or luxon DateTime object
  * @param observerPosition: (optional) a position object specifying the location
  *    of a satellite observer
- * @param angularUnits: (optional) configure if angular units are defined in 
- *    Degrees or Radians, default is Degrees
- * @param timestampFormat: (optional) sets the format of output timestamps,
- *    default is ISO8601
  * Returns either a single SatelliteObservation or array of 
  *    SatelliteObservations if an array of epochs is provided
  */
@@ -81,18 +78,17 @@ export function satelliteObservation(
   satelliteElements: TwoLineElement | OrbitMeanElementsMessage,
   epoch: Timestamp | Timestamp[],
   observerPosition?: Position,
-  angularUnits: AngularUnits = AngularUnits.Degrees,
-  timestampFormat: TimestampFormat = TimestampFormat.ISO8601
+  satelliteObservationOptions: SatelliteObservationOptions = {}
 ): SatelliteObservation | SatelliteObservation[] {
   if (Array.isArray(epoch)) {
     const [omm, satrec] = parseSatelliteElements(satelliteElements)
     return epoch.map((e) =>
-      computeSatelliteObservation(omm, satrec, parseTimestamp(e), observerPosition, angularUnits, timestampFormat)
+      computeSatelliteObservation(omm, satrec, parseTimestamp(e), observerPosition, satelliteObservationOptions)
     )
   } else {
     const datetime = parseTimestamp(epoch)
     const [omm, satrec] = parseSatelliteElements(satelliteElements)
-    return computeSatelliteObservation(omm, satrec, datetime, observerPosition, angularUnits, timestampFormat)
+    return computeSatelliteObservation(omm, satrec, datetime, observerPosition, satelliteObservationOptions)
   }
 }
 
@@ -118,10 +114,11 @@ export function satelliteTransits(
   stopTime: Timestamp,
   observerPosition: Position,
   minElevationAngle: Degrees | Radians = 0,
-  angularUnits: AngularUnits = AngularUnits.Degrees,
-  timestampFormat: TimestampFormat = TimestampFormat.ISO8601,
-  searchOptions: TransitSearchOptions = {}
+  satelliteTransitOptions?: SatelliteTransitOptions
 ): SatelliteTransit[] {
+  // Configure input/output options 
+  const options = {...defaultSatelliteTransitOptions, ...satelliteTransitOptions}
+
   const startDateTime = parseTimestamp(startTime)
   const stopDateTime = parseTimestamp(stopTime)
 
@@ -140,7 +137,7 @@ export function satelliteTransits(
   }
 
   // Propagate the satellite at the start time to see if it is decayed or geostationary
-  const initialObservation = computeSatelliteObservation(omm, satrec, startDateTime, observerPosition, angularUnits, timestampFormat)
+  const initialObservation = computeSatelliteObservation(omm, satrec, startDateTime, observerPosition, satelliteTransitOptions)
 
   // Check if the satellite has decayed
   if (initialObservation.decayed) {
@@ -159,30 +156,17 @@ export function satelliteTransits(
   // <----------------------------------------------------------------------->
   // SEARCH CONFIGURATION
   // <----------------------------------------------------------------------->
-
-  // Resolve the tunable precision/convergence controls, applying defaults.
-  //
-  // Crossing events (AOS, LOS, and the start/stop horizon crossings) are found
-  // by root-finding on the elevation value, so they converge on an angular
-  // tolerance in radians. Extremum events (peak elevation and the time of
-  // closest approach) are found by root-finding on the derivative, so they
-  // converge on a *rate* tolerance: elevation rate in radians per second for the
-  // peak, and slant-range rate in kilometers per second for TCA.
-  const elevationToleranceRadians = searchOptions.elevationToleranceRadians ?? 1e-6
-  const elevationRateTolerance = searchOptions.elevationRateTolerance ?? 1e-6
-  const slantRangeRateTolerance = searchOptions.slantRangeRateTolerance ?? 1e-4
-  const maxIterations = searchOptions.maxIterations ?? 100
-
+  
   // Convert the caller-supplied minimum elevation to radians. All internal math
   // is performed in radians; angular unit conversion happens only at output.
   const minElevationRadians: Radians =
-    angularUnits === AngularUnits.Degrees ? (minElevationAngle as number) * deg2rad : (minElevationAngle as number)
+    options.elevationAngularUnits === AngularUnits.Degrees ? (minElevationAngle as number) * deg2rad : (minElevationAngle as number)
 
   // The observer's geodetic position expressed in radians. `inferPosition`
   // (called inside computeSatelliteObservation) tolerates degree inputs, but the
   // low-level elevation helpers require radians, so normalize once here.
   const observerGeodeticRadians =
-    angularUnits === AngularUnits.Degrees
+    options.geodeticAngularUnits === AngularUnits.Degrees
       ? {
           latitude: observerPosition.geo!.latitude * deg2rad,
           longitude: observerPosition.geo!.longitude * deg2rad,
@@ -199,7 +183,7 @@ export function satelliteTransits(
   // (near-geostationary) satellites, which rise and set because the Earth turns
   // beneath them rather than from their own motion, are still sampled densely
   // enough to catch each pass.
-  const stepSeconds = searchOptions.coarseStepSeconds ?? dynamicStepSeconds(Number(omm.MEAN_MOTION))
+  const stepSeconds = options.coarseStepSeconds ?? dynamicStepSeconds(Number(omm.MEAN_MOTION))
   const stepMs = stepSeconds * 1000
 
   // Scalar functions of time used by both the coarse search and the secant
@@ -286,8 +270,8 @@ export function satelliteTransits(
       (ms) => elevationRate(ms),
       peakBracketAMs,
       peakBracketBMs,
-      elevationRateTolerance,
-      maxIterations,
+      options.elevationRateTolerance!,
+      options.maxIterations!,
     )
 
     // Filter out culminations whose peak never reaches the minimum elevation.
@@ -295,7 +279,7 @@ export function satelliteTransits(
     // A strict inequality also drops grazing passes whose peak only touches the
     // threshold, so a reported transit always genuinely exceeds minElevation.
     const peakObservation = computeSatelliteObservation(
-      omm, satrec, DateTime.fromMillis(peakMs, { zone: "utc" }), observerPosition, angularUnits, timestampFormat,
+      omm, satrec, DateTime.fromMillis(peakMs, { zone: "utc" }), observerPosition, options,
     )
     const peakElevationRadians = elevation(peakMs)
     if (peakElevationRadians <= minElevationRadians) {
@@ -325,8 +309,8 @@ export function satelliteTransits(
       (ms) => elevationRelativeTo(satrec, observerGeodeticRadians, ms, minElevationRadians),
       aosBracketMs,
       peakMs,
-      elevationToleranceRadians,
-      maxIterations,
+      options.elevationToleranceRadians!,
+      options.maxIterations!,
     )
 
     // <------------------------------------------------------------------->
@@ -351,8 +335,8 @@ export function satelliteTransits(
       (ms) => elevationRelativeTo(satrec, observerGeodeticRadians, ms, minElevationRadians),
       peakMs,
       losBracketMs,
-      elevationToleranceRadians,
-      maxIterations,
+      options.elevationToleranceRadians!,
+      options.maxIterations!,
     )
 
     // <------------------------------------------------------------------->
@@ -382,10 +366,10 @@ export function satelliteTransits(
       stopMsEvent = losMs
     } else {
       const rawStartMs = findHorizonCrossing(
-        satrec, observerGeodeticRadians, aosMs, peakMs, -stepMs, startMs, stopMs, elevationToleranceRadians, maxIterations,
+        satrec, observerGeodeticRadians, aosMs, peakMs, -stepMs, startMs, stopMs, options.elevationToleranceRadians!, options.maxIterations!,
       )
       const rawStopMs = findHorizonCrossing(
-        satrec, observerGeodeticRadians, losMs, peakMs, stepMs, startMs, stopMs, elevationToleranceRadians, maxIterations,
+        satrec, observerGeodeticRadians, losMs, peakMs, stepMs, startMs, stopMs, options.elevationToleranceRadians!, options.maxIterations!,
       )
 
       // The horizon crossings must bound the AOS/LOS pair; clamp so the
@@ -404,7 +388,7 @@ export function satelliteTransits(
 
     const slantRange = (ms: number): number =>
       computeSatelliteObservation(
-        omm, satrec, DateTime.fromMillis(ms, { zone: "utc" }), observerPosition, angularUnits, timestampFormat,
+        omm, satrec, DateTime.fromMillis(ms, { zone: "utc" }), observerPosition, options,
       ).slantRange!
     const rangeRate = (ms: number): number => {
       const before = slantRange(ms - rateDeltaMs)
@@ -415,8 +399,8 @@ export function satelliteTransits(
       (ms) => rangeRate(ms),
       peakBracketAMs,
       peakBracketBMs,
-      slantRangeRateTolerance,
-      maxIterations,
+      options.slantRangeRateTolerance!,
+      options.maxIterations!,
     )
 
     // <------------------------------------------------------------------->
@@ -428,17 +412,17 @@ export function satelliteTransits(
     // <------------------------------------------------------------------->
 
     transits.push({
-      start: formatTimestamp(DateTime.fromMillis(startMsEvent, { zone: "utc" }), timestampFormat),
-      stop: formatTimestamp(DateTime.fromMillis(stopMsEvent, { zone: "utc" }), timestampFormat),
+      start: formatTimestamp(DateTime.fromMillis(startMsEvent, { zone: "utc" }), options.timestampFormat!),
+      stop: formatTimestamp(DateTime.fromMillis(stopMsEvent, { zone: "utc" }), options.timestampFormat!),
       duration: (stopMsEvent - startMsEvent) / 1000,
       aos: buildTransitEvent(
-        computeSatelliteObservation(omm, satrec, DateTime.fromMillis(aosMs, { zone: "utc" }), observerPosition, angularUnits, timestampFormat),
+        computeSatelliteObservation(omm, satrec, DateTime.fromMillis(aosMs, { zone: "utc" }), observerPosition, options),
       ),
       los: buildTransitEvent(
-        computeSatelliteObservation(omm, satrec, DateTime.fromMillis(losMs, { zone: "utc" }), observerPosition, angularUnits, timestampFormat),
+        computeSatelliteObservation(omm, satrec, DateTime.fromMillis(losMs, { zone: "utc" }), observerPosition, options),
       ),
       tca: buildTransitEvent(
-        computeSatelliteObservation(omm, satrec, DateTime.fromMillis(tcaMs, { zone: "utc" }), observerPosition, angularUnits, timestampFormat),
+        computeSatelliteObservation(omm, satrec, DateTime.fromMillis(tcaMs, { zone: "utc" }), observerPosition, options),
       ),
       peak: buildTransitEvent(peakObservation),
     })
@@ -465,7 +449,8 @@ export type {
   SatelliteTransit,
   TransitEvent,
   Velocity,
-  TransitSearchOptions,
+  SatelliteObservationOptions,
+  SatelliteTransitOptions
 } from "./interfaces"
 
 export type {

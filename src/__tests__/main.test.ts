@@ -155,6 +155,17 @@ function expectedAngle(angleRadians: number, angular: AngularUnits): number {
   return angular === AngularUnits.Degrees ? radiansToDegrees(angleRadians) : angleRadians
 }
 
+function observationOptionsFor(angular: AngularUnits, timestamp: TimestampFormat) {
+  return {
+    azimuthAngularUnits: angular,
+    elevationAngularUnits: angular,
+    geodeticAngularUnits: angular,
+    betaAngleAngularUnits: angular,
+    orbitPhaseAngularUnits: angular,
+    timestampFormat: timestamp,
+  }
+}
+
 function observerPositionFor(angular: AngularUnits) {
   return {
     geo: angular === AngularUnits.Degrees
@@ -200,7 +211,12 @@ const transitUnitOptionCases = [
 
 describe('satelliteObservation', () => {
   test.each(unitOptionCases)('returns a ground track for $name', ({ angular, timestamp }) => {
-    const observed = satelliteObservation(issTle, observationEpoch, undefined, angular, timestamp) as SatelliteObservation
+    const observed = satelliteObservation(
+      issTle,
+      observationEpoch,
+      undefined,
+      observationOptionsFor(angular, timestamp),
+    ) as SatelliteObservation
     const date = new Date(observationEpoch)
     const satrec = json2satrec(convertTleToOmm(issTle))
     const propagated = propagate(satrec, date)
@@ -247,8 +263,7 @@ describe('satelliteObservation', () => {
       issOmm as OMMJsonObjectV3,
       observationEpoch,
       observerPosition,
-      angular,
-      timestamp,
+      observationOptionsFor(angular, timestamp),
     )
     const date = new Date(observationEpoch)
     const satrec = json2satrec(issOmm as OMMJsonObjectV3)
@@ -290,8 +305,7 @@ describe('satelliteObservation with array input', () => {
       issOmm as OMMJsonObjectV3,
       dateTimes,
       observerPosition,
-      angular,
-      timestamp,
+      observationOptionsFor(angular, timestamp),
     )
 
     expect(Array.isArray(observed)).toBe(true)
@@ -302,8 +316,7 @@ describe('satelliteObservation with array input', () => {
         issOmm as OMMJsonObjectV3,
         dateTime,
         observerPosition,
-        angular,
-        timestamp,
+        observationOptionsFor(angular, timestamp),
       )
 
       const { epoch: actualEpoch, ...actualRest } = (observed as any)[index]
@@ -331,8 +344,7 @@ describe('satelliteTransits', () => {
       transitWindowStop,
       observerPosition,
       0,
-      angular,
-      timestamp,
+      observationOptionsFor(angular, timestamp),
     )
 
     expect(transits.length).toBeGreaterThan(0)
@@ -361,10 +373,10 @@ describe('satelliteTransits', () => {
       expect(tcaMillis).toBeLessThanOrEqual(stopMillis)
       expect(Math.abs(transit.duration - ((stopMillis - startMillis) / 1000))).toBeLessThan(0.002)
 
-      const aosObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.aos.epoch, observerPosition, angular, timestamp) as any
-      const losObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.los.epoch, observerPosition, angular, timestamp) as any
-      const peakObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.peak.epoch, observerPosition, angular, timestamp) as any
-      const tcaObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.tca.epoch, observerPosition, angular, timestamp) as any
+      const aosObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.aos.epoch, observerPosition, observationOptionsFor(angular, timestamp)) as any
+      const losObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.los.epoch, observerPosition, observationOptionsFor(angular, timestamp)) as any
+      const peakObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.peak.epoch, observerPosition, observationOptionsFor(angular, timestamp)) as any
+      const tcaObservation = satelliteObservation(issOmm as OMMJsonObjectV3, transit.tca.epoch, observerPosition, observationOptionsFor(angular, timestamp)) as any
 
       expect(aosObservation.azimuth).toBeCloseTo(transit.aos.azimuth, 10)
       expect(aosObservation.elevation).toBeCloseTo(transit.aos.elevation, 10)

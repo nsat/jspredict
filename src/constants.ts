@@ -1,5 +1,7 @@
 import { AstronomialUnits } from "./types";
 import { Kilometer } from "satellite.js";
+import { SatelliteObservationOptions, SatelliteTransitOptions } from "./interfaces";
+import { TimestampFormat, AngularUnits } from "./enums";
 
 /** Astronomical Unit - km (IAU 76) */
 export const astronomicalUnit: AstronomialUnits = 1.49597870691E8;
@@ -49,3 +51,25 @@ export const WGS84 = {
   /** First eccentricity squared */
   e2: 0.00669437999014
 } as const;
+
+/**
+ * Satellite observation default options
+ */
+export const defaultSatelliteObservationOptions: SatelliteObservationOptions = {
+  azimuthAngularUnits: AngularUnits.Degrees,
+  elevationAngularUnits: AngularUnits.Degrees,
+  geodeticAngularUnits: AngularUnits.Degrees,
+  timestampFormat: TimestampFormat.ISO8601
+}
+
+/**
+ * Satellite transit default options
+ */
+export const defaultSatelliteTransitOptions: SatelliteTransitOptions = {
+  ...defaultSatelliteObservationOptions,
+  elevationToleranceRadians: 1e-6,
+  elevationRateTolerance: 1e-6,
+  slantRangeRateTolerance: 1e-4,
+  maxIterations: 100,
+  coarseStepSeconds: undefined
+}
