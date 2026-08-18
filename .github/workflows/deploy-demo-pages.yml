@@ -1,0 +1,51 @@
+# Builds the demo app and deploys it to GitHub Pages on every push to main.
+# See: https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+
+name: Deploy Demo App
+
+on:
+  push:
+    branches: [main]
+    # Skip deploys for documentation-only changes.
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - 'docs/**'
+  # Allow manually triggering the workflow from the Actions tab.
+  workflow_dispatch:
+
+# Allow the GITHUB_TOKEN to deploy to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; skip runs queued behind the latest.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run build:demo
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-demo
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
