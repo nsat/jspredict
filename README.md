@@ -8,14 +8,14 @@ from a TLE or OMM element set.
 ## Installation
 
 ```sh
-npm install jspredict
+npm install @nsat/jspredict
 ```
 
 JsPredict is published as an ES module and ships with TypeScript type
 definitions.
 
 ```ts
-import { satelliteObservation, satelliteTransits } from "jspredict"
+import { satelliteObservation, satelliteTransits } from "@nsat/jspredict"
 ```
 
 ## Concepts
@@ -187,7 +187,7 @@ included in the result.
 ### Basic usage
 
 ```ts
-import { satelliteObservation } from "jspredict"
+import { satelliteObservation } from "@nsat/jspredict"
 
 const observation = satelliteObservation(
   issTle,
@@ -358,7 +358,7 @@ loss-of-signal (LOS), peak-elevation, and time-of-closest-approach (TCA) events.
 ### Basic usage
 
 ```ts
-import { satelliteTransits } from "jspredict"
+import { satelliteTransits } from "@nsat/jspredict"
 
 const transits = satelliteTransits(
   issOmm,
@@ -502,7 +502,7 @@ Both functions accept a "options" object for configuring inputs and outputs:
 `AngularUnits` and `TimestampFormat` are exported Typescript enums:
 
 ```ts
-import { AngularUnits, TimestampFormat } from "jspredict"
+import { AngularUnits, TimestampFormat } from "@nsat/jspredict"
 
 enum AngularUnits {
   Degrees = "DEGREES",
@@ -530,7 +530,7 @@ enum TimestampFormat {
 ### Example: radians and Unix timestamps
 
 ```ts
-import { satelliteObservation, AngularUnits, TimestampFormat } from "jspredict"
+import { satelliteObservation, AngularUnits, TimestampFormat } from "@nsat/jspredict"
 
 const observation = satelliteObservation(
   issOmm,
