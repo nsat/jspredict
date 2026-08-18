@@ -1,5 +1,5 @@
 {
-  "name": "jspredict",
+  "name": "@nsat/jspredict",
   "version": "2.0.0",
   "description": "Javascript port of predict open-source satellite tracking library",
   "type": "module",
@@ -44,6 +44,9 @@
     "url": "https://github.com/nsat/jspredict/issues"
   },
   "homepage": "https://github.com/nsat/jspredict",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.23",
     "@radix-ui/react-tabs": "^1.1.21",
