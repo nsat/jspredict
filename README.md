@@ -55,19 +55,15 @@ const issOmm = {
 
 ### Timestamps
 
-Any field that accepts a time (`epoch`, `startTime`, `stopTime`) accepts a
-flexible `Timestamp`. The input format is **auto-detected** — you do **not**
-need to tell the library which one you are using, and the `timestampFormat`
-option affects **output only** (it has no effect on how inputs are parsed). Any
-of the four forms may be passed to either function, and you can even mix forms
-across arguments or within an epoch array:
+Function parameters that are typed as `Timestamp` allow the caller to supply
+datetime values in any of the following forms:
 
 | Input form | Type | Example | How it's interpreted |
 | --- | --- | --- | --- |
 | Unix milliseconds | `number` | `1786062649879` | Milliseconds since the Unix epoch, treated as **UTC**. |
 | ISO 8601 string | `string` | `"2026-08-07T00:30:49.879Z"` | Parsed as ISO 8601. See the timezone note below. |
 | JavaScript `Date` | `Date` | `new Date("2026-08-07T00:30:49.879Z")` | Converted directly from the `Date` instant. |
-| Luxon `DateTime` | `DateTime` | `DateTime.utc(2026, 8, 7)` | Used as-is, preserving its zone. |
+| Luxon `DateTime` | `DateTime` | `DateTime.utc(2026, 8, 7)` | Used as-is, preserving its timezone. |
 
 > Timezone handling for strings: if the ISO string carries an explicit offset or
 > `Z` (e.g. `2026-08-07T00:30:49.879Z` or `...+02:00`), that zone is respected.
@@ -99,15 +95,15 @@ satelliteTransits(
 )
 ```
 
-The **output** timestamp form (`epoch`, `start`, `stop`) is independent of the
-input and is controlled entirely by the `timestampFormat` option — see
-[Configuration options](#configuration-options). It defaults to ISO 8601
-strings. All times are computed in UTC.
+To control the **output** timestamp format (i.e. `epoch`, `start`, `stop`, 
+etc...) — see the `timestampFormat` option in
+[Configuration options](#configuration-options). Defaults to an ISO8601 UTC
+string if not specified by the caller.
 
 ### The `Position` object
 
-A `Position` object describes the location of an observer or celestial object. 
-A position can be expressed in any of **three coordinate frames**:
+A `Position` object describes the location of an observer or satellite relative
+to the Earth. A position can be expressed in any of **three coordinate frames**:
 
 ```ts
 interface Position {
@@ -123,9 +119,8 @@ interface Position {
 | `ecef` | Earth-Centered Earth-Fixed | `x`, `y`, `z` | kilometers |
 | `geo` | Geodetic (relative to the WGS84 ellipsoid) | `latitude`, `longitude`, `height` | `latitude`/`longitude` in degrees by default (or radians — see `geodeticAngularUnits`); `height` in kilometers above the ellipsoid |
 
-You must provide **at least one** frame; supplying none throws
-`At least one set of ECI, ECEF, or Geodetic coordinates must be defined to infer
-position.` Whichever frame you provide, the library computes the other two.
+When specifying the position of an observer, you must define all the parameters 
+for **at least one** of the coordinate coordinate frames:
 
 #### Geodetic (most common)
 
@@ -140,8 +135,8 @@ const observerPosition = {
 ```
 
 By default `latitude`/`longitude` are interpreted as **degrees**. Set
-`geodeticAngularUnits: AngularUnits.Radians` in the options to supply (and
-receive) radians instead. `height` is always kilometers.
+`geodeticAngularUnits: AngularUnits.Radians` in the function options. 
+The `height` parameter is always specified in kilometers.
 
 #### ECEF or ECI
 
@@ -170,8 +165,8 @@ Notes on the ECI/ECEF frames:
   Time at the observation `epoch`. Supply an ECI vector consistent with the
   epoch you are querying.
 - `geodeticAngularUnits` only affects the `geo` frame. When you supply `ecef`
-  or `eci`, the derived `geo` output still honors `geodeticAngularUnits` for
-  its returned units.
+  or `eci`, the derived `geo` output will honor the `geodeticAngularUnits`
+  option specified by the caller.
 
 ## `satelliteObservation`
 
@@ -186,8 +181,8 @@ satelliteObservation(
 
 Computes the satellite state at the given `epoch`. If `epoch` is an array, an
 array of observations is returned (one per timestamp, in order). If an observer
-position is supplied, look angles (azimuth, elevation, slant range, Doppler
-factor) are included in the result.
+position is supplied, look angles (i.e. `azimuth`, `elevation`, etc..) are 
+included in the result.
 
 ### Basic usage
 
@@ -199,9 +194,9 @@ const observation = satelliteObservation(
   "2026-08-07T00:30:49.879Z",
 )
 
-console.log(observation.position?.geo)   // sub-satellite lat/lon/height
-console.log(observation.velocity?.eci)   // ECI velocity vector
-console.log(observation.orbit?.revolutionCount)
+console.log(observation.position?.geo)   // Satellite position in lat/lon/height
+console.log(observation.velocity?.eci)   // Satellite velocity vector in ECI
+console.log(observation.orbit?.revolutionCount) // Satellite orbit count at epoch
 ```
 
 ```console
@@ -210,9 +205,9 @@ console.log(observation.orbit?.revolutionCount)
 57963
 ```
 
-The full returned object:
+Example `SatelliteTransit` result:
 
-```console
+```javascript
 {
   "id": "1998-067A",
   "name": "ISS (ZARYA)",
@@ -258,10 +253,10 @@ const observation = satelliteObservation(
   { geo: { latitude: 15, longitude: 130, height: 0.1 } },
 )
 
-console.log(observation.azimuth)     // compass heading to the satellite
-console.log(observation.elevation)   // angle above the horizon
-console.log(observation.slantRange)  // line-of-sight distance (km)
-console.log(observation.dopplerFactor)
+console.log(observation.azimuth)     // Compass heading to the satellite
+console.log(observation.elevation)   // Angle above the horizon
+console.log(observation.slantRange)  // Line-of-sight distance (km)
+console.log(observation.dopplerFactor) // Signal frequency shift
 ```
 
 With an observer, the observation additionally carries `observerPosition`,
@@ -274,7 +269,7 @@ With an observer, the observation additionally carries `observerPosition`,
 1.000019464535455
 ```
 
-```console
+```javascript
   ...
   "observerPosition": {
     "eci":  { "x": -350.5295256508939, "y": 6152.308010923147, "z": 1640.1260220778647 },
@@ -299,10 +294,9 @@ const observations = satelliteObservation(issOmm, epochs)
 // observations is a SatelliteObservation[] with one entry per epoch
 ```
 
-### Result shape
+### Result Schema
 
-`SatelliteObservation` includes (fields marked optional are omitted when not
-applicable, e.g. observer look angles require an observer position):
+The `SatelliteObservation` object contains the following fields:
 
 | Field | Description |
 | --- | --- |
@@ -322,15 +316,26 @@ applicable, e.g. observer look angles require an observer position):
 | `sunPosition` | Position of the Sun. |
 | `betaAngle` | Angle between the orbital plane and the Sun. |
 | `eclipseFactor` | Fraction of the Sun's disc obscured by Earth (0 = fully lit, 1 = umbra). |
-| `observerPosition` | Observer's position (only with an observer). |
-| `azimuth` | Heading to the satellite (only with an observer). |
-| `elevation` | Elevation above the horizon (only with an observer). |
-| `slantRange` | Observer-to-satellite distance in km (only with an observer). |
-| `dopplerFactor` | Frequency shift relative to the observer (only with an observer). |
+| `observerPosition` | Observer's position (only if observerPosition is defined). |
+| `azimuth` | Heading to the satellite (only if observerPosition is defined). |
+| `elevation` | Elevation above the horizon (only if observerPosition is defined). |
+| `slantRange` | Observer-to-satellite distance in km (only if observerPosition is defined). |
+| `dopplerFactor` | Frequency shift relative to the observer (only if observerPosition is defined). |
 
 > Note: if the propagated orbit has decayed, a minimal observation is returned
-> with `decayed: true` and only `id`, `name`, `noradCatalogId`, `orbitalModel`,
-> and `epoch` populated.
+> with `decayed: true`.
+
+Decayed satellite example:
+```javascript
+{
+  "id": "1998-067A",
+  "name": "ISS (ZARYA)",
+  "noradCatalogId": "25544",
+  "orbitalModel": "SGP4",
+  "epoch": "2026-08-07T00:30:49.879Z",
+  "decayed": true,
+}
+```
 
 ## `satelliteTransits`
 
@@ -346,8 +351,9 @@ satelliteTransits(
 ```
 
 Finds all passes of the satellite over `observerPosition` between `startTime`
-and `stopTime`. Each pass reports its horizon-to-horizon start/stop, plus AOS,
-LOS, peak-elevation, and time-of-closest-approach events.
+and `stopTime`. Each pass reports its horizon-to-horizon start/stop times, 
+transit duration (`stopTime` - `startTime`), acquisition-of-signal (AOS),
+loss-of-signal (LOS), peak-elevation, and time-of-closest-approach (TCA) events.
 
 ### Basic usage
 
@@ -375,9 +381,9 @@ peak elevation: 8.548911076956662
 ...
 ```
 
-A single element of the returned `SatelliteTransit[]`:
+Example `SatelliteTransit` result:
 
-```console
+```javascript
 {
   "start": "2026-08-07T07:16:32.212Z",
   "stop": "2026-08-07T07:24:51.248Z",
@@ -415,9 +421,9 @@ A single element of the returned `SatelliteTransit[]`:
 
 ### Minimum elevation threshold
 
-The fifth argument sets the minimum elevation that defines AOS/LOS. It defaults
-to `0` (true horizon). Passes whose peak elevation never exceeds the threshold
-are discarded.
+The `minElevationAngle` argument sets the minimum elevation for AOS/LOS,
+default is `0` degrees/radians (i.e. true horizon). Transits whose peak 
+elevation never exceed the minimum elevation threshold are discarded.
 
 ```ts
 // Only report passes that climb above 20 degrees
@@ -436,16 +442,16 @@ $ node transits-minel.js
 2   # vs. 5 passes with the default 0 threshold over the same window
 ```
 
-The units of `minElevationAngle` follow `elevationAngularUnits` (degrees by
-default).
+The units of `minElevationAngle` can be changed using the `elevationAngularUnits`
+option.
 
 - `start`/`stop` always mark the true-horizon (0°) crossings.
 - `aos`/`los` mark the crossings of `minElevationAngle`.
 - When `minElevationAngle` is `0`, `start === aos` and `stop === los`.
 
-### Result shape
+### Result Schema
 
-Each `SatelliteTransit` contains:
+The `SatelliteTransit` object contains the following fields:
 
 | Field | Description |
 | --- | --- |
@@ -457,33 +463,30 @@ Each `SatelliteTransit` contains:
 | `tca` | Time of closest approach (minimum slant range). |
 | `peak` | Peak-elevation (culmination) event. |
 
-Each event (`aos`, `los`, `tca`, `peak`) is a `TransitEvent`:
+Where `aos`, `los`, `tca`, and `peak` are `TransitEvent` objects defined as:
 
-```ts
-interface TransitEvent {
-  epoch: Timestamp
-  azimuth: number
-  elevation: number
-  slantRange: number   // km
-  dopplerFactor: number
-}
-```
+| Field | Description |
+| --- | --- |
+| `epoch` | The date and time of the event. |
+| `azimuth` | The compass heading of the satellite from the observer. |
+| `elevation` | The elevation angle of the satellite from the observer. |
+| `slantRange` | The straight-line distance of the satellite from the observer. |
+| `dopplerFactor` | The frequency shift of the satellite signal relative to the observer. |
 
 ### Errors and warnings
 
 - Throws `Stop date is less than or equal to start date` if
   `stopTime <= startTime`.
 - Emits a `console.warn` when the search window begins before the element set's
-  epoch (propagating before epoch is not recommended).
+  epoch (propagating before the satellite element's epoch is not recommended).
 - Returns `[]` and warns if the satellite has decayed, or if it is
   geostationary but sits below `minElevationAngle` for the observer.
 
 ## Configuration options
 
-Both functions accept a trailing options object.
-`satelliteObservation` uses `SatelliteObservationOptions`;
-`satelliteTransits` uses `SatelliteTransitOptions`, which extends the
-observation options with search-tuning controls.
+Both functions accept a "options" object for configuring inputs and outputs:
+- `satelliteObservation` uses `SatelliteObservationOptions`
+- `satelliteTransits` uses `SatelliteTransitOptions`
 
 ### Unit and format options (both functions)
 
@@ -496,7 +499,7 @@ observation options with search-tuning controls.
 | `orbitPhaseAngularUnits` | `AngularUnits` | `Degrees` | Units for the orbit `phase` output. |
 | `timestampFormat` | `TimestampFormat` | `ISO8601` | Format of all output timestamps. |
 
-`AngularUnits` and `TimestampFormat` are exported enums:
+`AngularUnits` and `TimestampFormat` are exported Typescript enums:
 
 ```ts
 import { AngularUnits, TimestampFormat } from "jspredict"
