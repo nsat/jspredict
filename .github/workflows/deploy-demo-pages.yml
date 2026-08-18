@@ -6,6 +6,11 @@ name: Deploy Demo App
 on:
   push:
     branches: [main]
+    # Skip deploys for documentation-only changes.
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - 'docs/**'
   # Allow manually triggering the workflow from the Actions tab.
   workflow_dispatch:
 
