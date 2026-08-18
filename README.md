@@ -5,6 +5,10 @@ propagation models (via [satellite.js](https://github.com/shashwatak/satellite-j
 to compute satellite positions, observer look angles, and ground-station passes
 from a TLE or OMM element set.
 
+## Demo
+
+A sample application demonstrating the library's capabilities can be found at: [https://nsat.github.io/jspredict/](https://nsat.github.io/jspredict/)
+
 ## Installation
 
 ```sh
@@ -651,7 +655,3 @@ satelliteTransits(
   2,
 )
 ```
-
-## License
-
-MIT. See the license header in the source for details.
