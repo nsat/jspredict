@@ -1,8 +1,19 @@
 {
   "name": "jspredict",
-  "version": "1.2.0",
-  "description": "javascript port of predict open-source satellite tracking library",
-  "main": "jspredict.js",
+  "version": "2.0.0",
+  "description": "Javascript port of predict open-source satellite tracking library",
+  "type": "module",
+  "module": "./dist/jspredict.js",
+  "exports": {
+    ".": {
+      "import": "./dist/jspredict.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "benchmark": "npx tsx scripts/benchmark.ts"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/nsat/jspredict"
@@ -23,14 +34,28 @@
     "spacecraft",
     "spire"
   ],
-  "author": "Roshan Jobanputra <roshan@spire.com>",
+  "author": "Spire",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/nsat/jspredict/issues"
   },
   "homepage": "https://github.com/nsat/jspredict",
   "dependencies": {
-    "moment": "^2.24.0",
-    "satellite.js": "^3.0.1"
+    "luxon": "^3.7.2",
+    "satellite.js": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.4",
+    "@typescript/typescript6": "^6.0.2",
+    "eslint": "^10.8.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
   }
 }
