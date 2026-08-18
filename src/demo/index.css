@@ -1,0 +1,90 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Spire core palette
+ *   Pure White  #ffffff
+ *   Spire Dark  #04060f
+ *   Spire Red   #be0000
+ *   Grey 7      #fafafa
+ *   Grey 6      #f2f2f2
+ *   Grey 5      #e2e2e2
+ */
+:root {
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #04060f;
+  --card: #ffffff;
+  --card-foreground: #04060f;
+  --popover: #ffffff;
+  --popover-foreground: #04060f;
+  --primary: #be0000;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f2f2;
+  --secondary-foreground: #04060f;
+  --muted: #fafafa;
+  --muted-foreground: #5c5f66;
+  --accent: #f2f2f2;
+  --accent-foreground: #04060f;
+  --destructive: #be0000;
+  --border: #e2e2e2;
+  --input: #e2e2e2;
+  --ring: #be0000;
+}
+
+.dark {
+  --background: #04060f;
+  --foreground: #fafafa;
+  --card: #0b0e1a;
+  --card-foreground: #fafafa;
+  --popover: #0b0e1a;
+  --popover-foreground: #fafafa;
+  --primary: #be0000;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1d29;
+  --secondary-foreground: #fafafa;
+  --muted: #14171f;
+  --muted-foreground: #9ca0a8;
+  --accent: #1a1d29;
+  --accent-foreground: #fafafa;
+  --destructive: #be0000;
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: #be0000;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

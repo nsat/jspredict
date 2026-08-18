@@ -147,3 +147,4 @@ vite.config.ts.timestamp-*
 pypredict/
 _pypredict/
 compare/
+dist-demo/
