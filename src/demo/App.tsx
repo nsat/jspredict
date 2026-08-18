@@ -658,7 +658,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              JsPredict Transit Predictor
+              JsPredict
             </h1>
             <p className="text-muted-foreground text-sm">
               Upload or paste a TLE or OMM, set an observer location, then
