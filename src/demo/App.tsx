@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from "react"
 import {
   ChevronRight,
+  Code,
   LocateFixed,
   RotateCcw,
   Satellite,
   Upload,
 } from "lucide-react"
 
-import { satelliteTransits, TimestampFormat } from "../lib/main"
-import type { Position, SatelliteTransit, TransitEvent } from "../lib/main"
+import {
+  satelliteObservation,
+  satelliteTransits,
+  TimestampFormat,
+} from "../lib/main"
+import type {
+  Position,
+  SatelliteObservation,
+  SatelliteTransit,
+  TransitEvent,
+} from "../lib/main"
 import {
   formatAngle,
   formatDuration,
@@ -47,6 +57,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 
 type Status = { message: string; kind: "info" | "error" | "success" } | null
@@ -82,46 +93,81 @@ function EventDetails({
   transit: SatelliteTransit
   tz: TimeZoneMode
 }) {
+  const [raw, setRaw] = useState(false)
   return (
-    <div className="grid gap-3 rounded-md border bg-muted/40 p-4">
-      {EVENT_LABELS.map(({ key, label }) => {
-        const event = transit[key] as TransitEvent
-        return (
-          <div
-            key={key}
-            className="grid gap-2 border-b pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[16rem_1fr] sm:items-baseline sm:gap-4"
-          >
-            <span className="font-medium">{label}</span>
-            <dl className="text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-0.5 text-sm sm:grid-cols-[minmax(14rem,auto)_repeat(3,auto)]">
-              <div className="flex flex-col">
-                <dt>Time</dt>
-                <dd className="text-foreground whitespace-nowrap">
-                  {formatTime(event.epoch as string, tz)}
-                </dd>
+    <div className="grid gap-2">
+      <RawToggle raw={raw} onToggle={() => setRaw((v) => !v)} />
+      <div className="grid gap-3 rounded-md border bg-muted/40 p-4">
+        {raw ? (
+          <RawPre data={transit} />
+        ) : (
+          EVENT_LABELS.map(({ key, label }) => {
+            const event = transit[key] as TransitEvent
+            return (
+              <div
+                key={key}
+                className="grid gap-2 border-b pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[16rem_1fr] sm:items-baseline sm:gap-4"
+              >
+                <span className="font-medium">{label}</span>
+                <dl className="text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-0.5 text-sm sm:grid-cols-[minmax(14rem,auto)_repeat(3,auto)]">
+                  <div className="flex flex-col">
+                    <dt>Time</dt>
+                    <dd className="text-foreground whitespace-nowrap">
+                      {formatTime(event.epoch as string, tz)}
+                    </dd>
+                  </div>
+                  <div className="flex flex-col">
+                    <dt>Azimuth</dt>
+                    <dd className="text-foreground">
+                      {formatAngle(event.azimuth as number)}
+                    </dd>
+                  </div>
+                  <div className="flex flex-col">
+                    <dt>Elevation</dt>
+                    <dd className="text-foreground">
+                      {formatAngle(event.elevation as number)}
+                    </dd>
+                  </div>
+                  <div className="flex flex-col">
+                    <dt>Range</dt>
+                    <dd className="text-foreground">
+                      {formatRange(event.slantRange)}
+                    </dd>
+                  </div>
+                </dl>
               </div>
-              <div className="flex flex-col">
-                <dt>Azimuth</dt>
-                <dd className="text-foreground">
-                  {formatAngle(event.azimuth as number)}
-                </dd>
-              </div>
-              <div className="flex flex-col">
-                <dt>Elevation</dt>
-                <dd className="text-foreground">
-                  {formatAngle(event.elevation as number)}
-                </dd>
-              </div>
-              <div className="flex flex-col">
-                <dt>Range</dt>
-                <dd className="text-foreground">
-                  {formatRange(event.slantRange)}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        )
-      })}
+            )
+          })
+        )}
+      </div>
     </div>
+  )
+}
+
+/** Small toggle button that switches a result view between pretty and raw. */
+function RawToggle({
+  raw,
+  onToggle,
+}: {
+  raw: boolean
+  onToggle: () => void
+}) {
+  return (
+    <div className="flex justify-end">
+      <Button variant="outline" size="sm" onClick={onToggle}>
+        <Code />
+        {raw ? "Formatted" : "Raw"}
+      </Button>
+    </div>
+  )
+}
+
+/** Pretty-printed JSON block. */
+function RawPre({ data }: { data: unknown }) {
+  return (
+    <pre className="bg-background overflow-x-auto rounded-md border p-3 font-mono text-xs">
+      {JSON.stringify(data, null, 2)}
+    </pre>
   )
 }
 
@@ -163,6 +209,202 @@ function TransitRow({
   )
 }
 
+// <-------------------------------------------------------------------------->
+// Observation view
+// <-------------------------------------------------------------------------->
+
+function num(value: number | undefined, digits = 3, unit = ""): string {
+  if (value == null || Number.isNaN(value)) return "\u2014"
+  return `${value.toFixed(digits)}${unit ? ` ${unit}` : ""}`
+}
+
+/** A labeled value shown in the observation summary grid. */
+function Stat({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd className="text-sm font-medium">{value}</dd>
+    </div>
+  )
+}
+
+function Vec3({
+  vec,
+  unit,
+}: {
+  vec?: { x: number; y: number; z: number }
+  unit: string
+}) {
+  if (!vec) return <span className="text-muted-foreground">{"\u2014"}</span>
+  return (
+    <span className="font-mono text-xs">
+      x {num(vec.x, 2)} · y {num(vec.y, 2)} · z {num(vec.z, 2)}{" "}
+      <span className="text-muted-foreground">{unit}</span>
+    </span>
+  )
+}
+
+function Badge({
+  children,
+  tone = "muted",
+}: {
+  children: React.ReactNode
+  tone?: "muted" | "positive" | "negative"
+}) {
+  const cls =
+    tone === "positive"
+      ? "border-emerald-500/40 text-emerald-500"
+      : tone === "negative"
+        ? "border-destructive/40 text-destructive"
+        : "text-muted-foreground"
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-xs ${cls}`}>
+      {children}
+    </span>
+  )
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-md border p-4">
+      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      {children}
+    </div>
+  )
+}
+
+function ObservationView({
+  observation,
+  tz,
+}: {
+  observation: SatelliteObservation
+  tz: TimeZoneMode
+}) {
+  const o = observation
+  const geo = o.position?.geo
+  const sunGeo = o.sunPosition?.geo
+  const [raw, setRaw] = useState(false)
+
+  return (
+    <div className="grid gap-4">
+      <RawToggle raw={raw} onToggle={() => setRaw((v) => !v)} />
+      {raw ? (
+        <RawPre data={o} />
+      ) : (
+        <>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-lg font-semibold">{o.name}</span>
+        <Badge>NORAD {o.noradCatalogId}</Badge>
+        <Badge>{o.id}</Badge>
+        {o.orbitalModel && <Badge>{o.orbitalModel}</Badge>}
+        {o.decayed ? (
+          <Badge tone="negative">Decayed</Badge>
+        ) : (
+          <>
+            <Badge tone={o.sunlit ? "positive" : "muted"}>
+              {o.sunlit ? "Sunlit" : "Eclipsed"}
+            </Badge>
+            {o.geostationary && <Badge>Geostationary</Badge>}
+          </>
+        )}
+      </div>
+
+      {o.decayed ? (
+        <p className="text-muted-foreground text-sm">
+          This satellite's orbit has decayed as of{" "}
+          {formatTime(o.epoch as string, tz)}.
+        </p>
+      ) : (
+        <>
+          <Section title="Epoch & Position">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              <Stat label="Epoch" value={formatTime(o.epoch as string, tz)} />
+              <Stat label="Latitude" value={num(geo?.latitude, 4, "\u00B0")} />
+              <Stat label="Longitude" value={num(geo?.longitude, 4, "\u00B0")} />
+              <Stat label="Altitude" value={num(geo?.height, 2, "km")} />
+              <Stat label="Footprint" value={num(o.footprint, 1, "km")} />
+              <Stat
+                label="GMST"
+                value={num(o.gmst as number, 4, "rad")}
+              />
+            </dl>
+          </Section>
+
+          {o.observerPosition && (
+            <Section title="Observer Look Angles">
+              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <Stat
+                  label="Azimuth"
+                  value={num(o.azimuth as number, 2, "\u00B0")}
+                />
+                <Stat
+                  label="Elevation"
+                  value={num(o.elevation as number, 2, "\u00B0")}
+                />
+                <Stat label="Slant range" value={num(o.slantRange, 1, "km")} />
+                <Stat
+                  label="Doppler factor"
+                  value={num(o.dopplerFactor, 6)}
+                />
+              </dl>
+            </Section>
+          )}
+
+          <Section title="Orbit">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Stat label="Revolution #" value={o.orbit?.revolutionCount ?? "\u2014"} />
+              <Stat
+                label="Phase"
+                value={num(o.orbit?.phase as number, 2, "\u00B0")}
+              />
+              <Stat label="Phase (0-256)" value={num(o.orbit?.phase256, 2)} />
+              <Stat
+                label="Velocity"
+                value={num(o.orbit?.velocity, 3, "km/s")}
+              />
+            </dl>
+          </Section>
+
+          <Section title="State Vectors">
+            <dl className="grid gap-3">
+              <Stat label="Position (ECI)" value={<Vec3 vec={o.position?.eci} unit="km" />} />
+              <Stat label="Position (ECEF)" value={<Vec3 vec={o.position?.ecef} unit="km" />} />
+              <Stat label="Velocity (ECI)" value={<Vec3 vec={o.velocity?.eci} unit="km/s" />} />
+              <Stat label="Velocity (ECEF)" value={<Vec3 vec={o.velocity?.ecef} unit="km/s" />} />
+            </dl>
+          </Section>
+
+          <Section title="Sun Geometry">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Stat
+                label="Beta angle"
+                value={num(o.betaAngle as number, 2, "\u00B0")}
+              />
+              <Stat label="Eclipse factor" value={num(o.eclipseFactor, 3)} />
+              <Stat label="Sun latitude" value={num(sunGeo?.latitude, 2, "\u00B0")} />
+              <Stat label="Sun longitude" value={num(sunGeo?.longitude, 2, "\u00B0")} />
+            </dl>
+          </Section>
+        </>
+      )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
   const [elements, setElements] = useState("")
   const [lat, setLat] = useState("0.0")
@@ -198,8 +440,16 @@ export default function App() {
   const [locating, setLocating] = useState(false)
   const [computing, setComputing] = useState(false)
 
+  // Which mode's controls/results are active.
+  const [mode, setMode] = useState<"transits" | "observation">("observation")
+
   const [resultName, setResultName] = useState<string | null>(null)
   const [transits, setTransits] = useState<SatelliteTransit[] | null>(null)
+  const [observation, setObservation] = useState<SatelliteObservation | null>(
+    null,
+  )
+  const [obsStatus, setObsStatus] = useState<Status>(null)
+  const [observing, setObserving] = useState(false)
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -231,6 +481,8 @@ export default function App() {
     setLocateStatus(null)
     setResultName(null)
     setTransits(null)
+    setObservation(null)
+    setObsStatus(null)
     if (fileRef.current) fileRef.current.value = ""
   }
 
@@ -340,6 +592,63 @@ export default function App() {
     }
   }
 
+  function computeObservation() {
+    setObservation(null)
+    setResultName(null)
+    try {
+      const { elements: parsed, name } = parseElementSet(elements)
+
+      const latitude = Number(lat)
+      const longitude = Number(lon)
+      const heightKm = Number(height)
+
+      if (Number.isNaN(latitude) || latitude < -90 || latitude > 90) {
+        throw new Error("Latitude must be between -90 and 90 degrees.")
+      }
+      if (Number.isNaN(longitude) || longitude < -180 || longitude > 180) {
+        throw new Error("Longitude must be between -180 and 180 degrees.")
+      }
+      if (Number.isNaN(heightKm)) {
+        throw new Error("Height must be a number (kilometers).")
+      }
+
+      const observerPosition: Position = {
+        geo: { latitude, longitude, height: heightKm },
+      }
+
+      setObserving(true)
+      setObsStatus({
+        message: "Computing observation\u2026",
+        kind: "info",
+      })
+
+      setTimeout(() => {
+        try {
+          const t0 = performance.now()
+          const result = satelliteObservation(
+            parsed,
+            new Date(startMs),
+            observerPosition,
+            { timestampFormat: TimestampFormat.ISO8601 },
+          ) as SatelliteObservation
+          const elapsed = Math.round(performance.now() - t0)
+          setResultName(name)
+          setObservation(result)
+          setObsStatus({
+            message: `Computed observation in ${elapsed} ms.`,
+            kind: "success",
+          })
+        } catch (err) {
+          setObsStatus({ message: (err as Error).message, kind: "error" })
+        } finally {
+          setObserving(false)
+        }
+      }, 0)
+    } catch (err) {
+      setObsStatus({ message: (err as Error).message, kind: "error" })
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-5xl px-6 py-10">
@@ -352,8 +661,8 @@ export default function App() {
               JsPredict Transit Predictor
             </h1>
             <p className="text-muted-foreground text-sm">
-              Upload or paste a TLE or OMM, set an observer location, and see
-              all satellite transits over the selected time window.
+              Upload or paste a TLE or OMM, set an observer location, then
+              compute satellite transits or a point-in-time observation.
             </p>
           </div>
         </header>
@@ -361,7 +670,7 @@ export default function App() {
         <div className="grid gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>1. Satellite element set</CardTitle>
+              <CardTitle>Satellite Element Set</CardTitle>
               <CardDescription>
                 A TLE may include an optional leading name line. An OMM may be a
                 single object or an array (as returned by Space-Track).
@@ -403,7 +712,7 @@ export default function App() {
 
           <Card>
             <CardHeader>
-              <CardTitle>2. Observer location</CardTitle>
+              <CardTitle>Observer Location</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-4 sm:grid-cols-4">
@@ -457,109 +766,199 @@ export default function App() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>3. Time window</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <DateTimePicker
-                  value={msToWallClock(startMs, timezone)}
-                  timeLabel={timezoneLabel(timezone)}
-                  onChange={(wall) => {
-                    startEditedRef.current = true
-                    setStartMs(wallClockToMs(wall, timezone))
-                  }}
-                />
-                <div className="grid gap-2">
-                  <Label htmlFor="duration">Duration</Label>
-                  <Select value={duration} onValueChange={setDuration}>
-                    <SelectTrigger id="duration" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">1 day</SelectItem>
-                      <SelectItem value="7">7 days</SelectItem>
-                      <SelectItem value="30">30 days</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <Select
-                    value={timezone}
-                    onValueChange={(v) => setTimezone(v as TimeZoneMode)}
-                  >
-                    <SelectTrigger id="timezone" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="local">
-                        Local time ({timezoneLabel("local")})
-                      </SelectItem>
-                      <SelectItem value="utc">UTC</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Button onClick={compute} disabled={computing}>
-                  Compute transits
-                </Button>
-                <StatusText status={status} />
-              </div>
-            </CardContent>
-          </Card>
+          <Tabs
+            value={mode}
+            onValueChange={(v) => setMode(v as "transits" | "observation")}
+          >
+            <TabsList>
+              <TabsTrigger value="observation">Observation</TabsTrigger>
+              <TabsTrigger value="transits">Transits</TabsTrigger>
+            </TabsList>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <CardTitle>{resultName ?? "Results"}</CardTitle>
-                {transits && (
-                  <span className="text-muted-foreground rounded-full border px-2.5 py-0.5 text-xs">
-                    {transits.length} transit{transits.length === 1 ? "" : "s"}
-                  </span>
-                )}
-              </div>
-              {transits && transits.length > 0 && (
-                <CardDescription>
-                  Times shown in{" "}
-                  {timezone === "utc"
-                    ? "UTC"
-                    : `your local timezone (${timezoneLabel("local")})`}
-                  . Select a row to view its transit events.
-                </CardDescription>
-              )}
-            </CardHeader>
-            <CardContent>
-              {!transits ? (
-                <p className="text-muted-foreground text-sm">
-                  Results will appear here.
-                </p>
-              ) : transits.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  No transits found for the selected window.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-8" />
-                      <TableHead>#</TableHead>
-                      <TableHead>Start</TableHead>
-                      <TableHead>Stop</TableHead>
-                      <TableHead>Duration</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {transits.map((t, i) => (
-                      <TransitRow key={i} transit={t} index={i} tz={timezone} />
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+            {/* ---------------------------- Transits ---------------------------- */}
+            <TabsContent value="transits" className="grid gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Compute Satellite Transits</CardTitle>
+                  <CardDescription>
+                    Find every pass over the observer location within the
+                    selected time window.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <DateTimePicker
+                      value={msToWallClock(startMs, timezone)}
+                      dateLabel="Start Date"
+                      timeLabel={`Start Time (${timezoneLabel(timezone)})`}
+                      onChange={(wall) => {
+                        startEditedRef.current = true
+                        setStartMs(wallClockToMs(wall, timezone))
+                      }}
+                    />
+                    <div className="grid gap-2">
+                      <Label htmlFor="duration">Duration</Label>
+                      <Select value={duration} onValueChange={setDuration}>
+                        <SelectTrigger id="duration" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 day</SelectItem>
+                          <SelectItem value="7">7 days</SelectItem>
+                          <SelectItem value="30">30 days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="timezone">Timezone</Label>
+                      <Select
+                        value={timezone}
+                        onValueChange={(v) => setTimezone(v as TimeZoneMode)}
+                      >
+                        <SelectTrigger id="timezone" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local">
+                            Local time ({timezoneLabel("local")})
+                          </SelectItem>
+                          <SelectItem value="utc">UTC</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button onClick={compute} disabled={computing}>
+                      Compute Transits
+                    </Button>
+                    <StatusText status={status} />
+                  </div>
+
+                  <hr className="border-border" />
+
+                  <div className="grid gap-3">
+                    {transits && (
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-sm font-semibold">
+                          {resultName}
+                        </h3>
+                        <span className="text-muted-foreground rounded-full border px-2.5 py-0.5 text-xs">
+                          {transits.length} transit
+                          {transits.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    )}
+                    {transits && transits.length > 0 && (
+                      <p className="text-muted-foreground text-sm">
+                        Times shown in{" "}
+                        {timezone === "utc"
+                          ? "UTC"
+                          : `your local timezone (${timezoneLabel("local")})`}
+                        . Select a row to view its transit events.
+                      </p>
+                    )}
+                    {transits && transits.length === 0 ? (
+                      <p className="text-muted-foreground text-sm">
+                        No transits found for the selected window.
+                      </p>
+                    ) : transits && transits.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-8" />
+                            <TableHead>#</TableHead>
+                            <TableHead>Start</TableHead>
+                            <TableHead>Stop</TableHead>
+                            <TableHead>Duration</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {transits.map((t, i) => (
+                            <TransitRow
+                              key={i}
+                              transit={t}
+                              index={i}
+                              tz={timezone}
+                            />
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* --------------------------- Observation --------------------------- */}
+            <TabsContent value="observation" className="grid gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Compute Satellite Observation</CardTitle>
+                  <CardDescription>
+                    Compute the satellite's state at a single point in time.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <DateTimePicker
+                      value={msToWallClock(startMs, timezone)}
+                      dateLabel="Date"
+                      timeLabel={`Time (${timezoneLabel(timezone)})`}
+                      onChange={(wall) => {
+                        startEditedRef.current = true
+                        setStartMs(wallClockToMs(wall, timezone))
+                      }}
+                    />
+                    <div className="grid gap-2">
+                      <Label htmlFor="timezone-obs">Timezone</Label>
+                      <Select
+                        value={timezone}
+                        onValueChange={(v) => setTimezone(v as TimeZoneMode)}
+                      >
+                        <SelectTrigger id="timezone-obs" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local">
+                            Local time ({timezoneLabel("local")})
+                          </SelectItem>
+                          <SelectItem value="utc">UTC</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button onClick={computeObservation} disabled={observing}>
+                      Compute Observation
+                    </Button>
+                    <StatusText status={obsStatus} />
+                  </div>
+
+                  <hr className="border-border" />
+
+                  <div className="grid gap-3">
+                    {observation && (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-sm font-semibold">
+                            {observation.name}
+                          </h3>
+                        </div>
+                        <p className="text-muted-foreground text-sm">
+                          Epoch shown in{" "}
+                          {timezone === "utc"
+                            ? "UTC"
+                            : `your local timezone (${timezoneLabel("local")})`}
+                          .
+                        </p>
+                        <ObservationView observation={observation} tz={timezone} />
+                      </>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

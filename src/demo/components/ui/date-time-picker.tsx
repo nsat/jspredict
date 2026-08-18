@@ -24,13 +24,16 @@ import {
 export function DateTimePicker({
   value,
   onChange,
-  timeLabel,
+  dateLabel = "Date",
+  timeLabel = "Time",
 }: {
   /** A Date whose wall-clock fields are the values to display/edit. */
   value: Date
   /** Called with a new wall-clock Date when the user picks a date or time. */
   onChange: (next: Date) => void
-  /** Optional suffix for the time field label (e.g. a timezone identifier). */
+  /** Label for the date field. Defaults to "Date". */
+  dateLabel?: string
+  /** Label for the time field. Defaults to "Time". */
   timeLabel?: string
 }) {
   const [open, setOpen] = React.useState(false)
@@ -52,7 +55,7 @@ export function DateTimePicker({
   return (
     <>
       <Field>
-        <FieldLabel htmlFor="date-picker">Start Date</FieldLabel>
+        <FieldLabel htmlFor="date-picker">{dateLabel}</FieldLabel>
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button
@@ -80,7 +83,7 @@ export function DateTimePicker({
       </Field>
       <Field>
         <FieldLabel htmlFor="time-picker">
-          Start Time
+          {timeLabel}
         </FieldLabel>
         <Input
           type="time"

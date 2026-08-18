@@ -46,6 +46,7 @@
   "homepage": "https://github.com/nsat/jspredict",
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.23",
+    "@radix-ui/react-tabs": "^1.1.21",
     "date-fns": "^4.4.0",
     "luxon": "^3.7.2",
     "react": "^19.2.8",
