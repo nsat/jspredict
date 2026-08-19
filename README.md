@@ -209,7 +209,7 @@ console.log(observation.orbit?.revolutionCount) // Satellite orbit count at epoc
 57963
 ```
 
-Example `SatelliteTransit` result:
+Example `SatelliteObservation` result:
 
 ```javascript
 {
