@@ -40,8 +40,13 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [
-      // Generates type files so consumers get IntelliSense in VS Code
+      // Generates type files so consumers get IntelliSense in VS Code.
+      // bundleTypes rolls every declaration into a single dist/jspredict.d.ts
+      // via @microsoft/api-extractor. include is scoped to the library entry
+      // so the demo app's declarations are not emitted.
       dts({
+        bundleTypes: true,
+        include: ['src/lib/**'],
         exclude: [
           'src/lib/__tests__/**'
         ]
