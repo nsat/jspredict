@@ -11,6 +11,16 @@ A sample application demonstrating the library's capabilities can be found at: [
 
 ## Installation
 
+This package is published to the **GitHub Packages** registry under the `@nsat` scope.
+Configure npm to resolve the `@nsat` scope from GitHub Packages by adding an `.npmrc`
+to your project (or your user `~/.npmrc`):
+
+```ini
+@nsat:registry=https://npm.pkg.github.com
+```
+
+Authenticate your NPM client with GitHub Packages using a personal access token by following [these](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-with-a-personal-access-token) instructions. I suggest using the CLI method to avoid storing your token in the `.npmrc` file. Once authenticated, install the package as you normally would:
+
 ```sh
 npm install @nsat/jspredict
 ```
