@@ -2,6 +2,7 @@ import type {
   OrbitMeanElementsMessage,
   TwoLineElement,
 } from "../lib/main"
+import { SatelliteSunEventType } from "../lib/main"
 
 export type ParsedElements = {
   elements: TwoLineElement | OrbitMeanElementsMessage
@@ -144,6 +145,28 @@ export function formatAngle(deg: number): string {
 
 export function formatRange(km: number): string {
   return `${km.toFixed(0)} km`
+}
+
+export function formatSunlit(sunlit: boolean): string {
+  return sunlit ? "Sunlit" : "Eclipse"
+}
+
+export function formatEclipseFactor(factor: number): string {
+  return `${(factor * 100).toFixed(0)}%`
+}
+
+/** A human-readable label for a sun event regime. */
+export function formatSunEventType(eventType: SatelliteSunEventType): string {
+  switch (eventType) {
+    case SatelliteSunEventType.Sunlit:
+      return "Sunlit"
+    case SatelliteSunEventType.Transition:
+      return "Transition"
+    case SatelliteSunEventType.Eclipse:
+      return "Eclipse"
+    default:
+      return String(eventType)
+  }
 }
 
 // <-------------------------------------------------------------------------->

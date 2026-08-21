@@ -1,6 +1,10 @@
 import { EcfVec3, EciVec3, GeodeticLocation, Radians, Degrees, Kilometer, KilometerPerSecond } from "satellite.js"
 import { Timestamp, Seconds } from "./types.ts"
-import { AngularUnits, TimestampFormat } from "./enums.ts"
+import { AngularUnits, SatelliteSunEventType, TimestampFormat } from "./enums.ts"
+
+// <--------------------------------------------------------------------------->
+// INPUT/OUTPUT
+// <--------------------------------------------------------------------------->
 
 /** Position parameters */
 export interface Position {
@@ -118,12 +122,6 @@ export interface SatelliteObservation {
 
   /** Satellite frequency shift (i.e doppler factor) relative to observer. */
   dopplerFactor?: number
-
-  /** Indicates if the satellite is optically visible at the observer's location */
-  visibility?: string 
-
-  /** Indicates if the satellite is above the observer's horizon */
-  hasAos?: boolean
 }
 
 /**
@@ -133,6 +131,12 @@ export interface TransitEvent {
   /** Date and time of the event as a ISO8601 timestamp */
   epoch: Timestamp
 
+  /** Satellite position coordinates at the specified epoch */
+  position: Position
+
+  /** Satellite velocity vectors at the specified epoch */
+  velocity: Velocity
+  
   /** Satellite compass direction, measured in Degrees or Radians */
   azimuth: Degrees | Radians
 
@@ -144,16 +148,25 @@ export interface TransitEvent {
 
   /** Satellite frequency shift (i.e doppler factor) relative to observer. */
   dopplerFactor: number
+
+  /** Indicates if the satellite is in eclipse */
+  sunlit: boolean
+  
+  /**
+   * The fraction of the Sun’s disc obscured by the Earth as seen from a satellite.
+   * 0 = fully lit, 1 = umbra, values between 0 and 1 indicate the fraction of the Sun covered by Earth.
+   */
+  eclipseFactor: number
 }
 
 /**
  * Satellite transit parameters
  */
 export interface SatelliteTransit {
-  /** Transit UTC start time as an ISO8601 timestamp */
+  /** Transit start timestamp */
   start: Timestamp
 
-  /** Transit UTC stop time as an ISO8601 timestamp */
+  /** Transit stop timestamp */
   stop: Timestamp
 
   /** Duration of transit from start to stop time, measured in seconds (s) */
@@ -171,6 +184,27 @@ export interface SatelliteTransit {
   /** Peak elevation event parameters */
   peak: TransitEvent
 }
+
+/**
+ * Satellite sun events
+ */
+export interface SatelliteSunEvent {
+  /** Specifies the type of sun event */
+  eventType: SatelliteSunEventType
+
+  /** Transit UTC start time as an ISO8601 timestamp */
+  start: Timestamp
+
+  /** Transit UTC stop time as an ISO8601 timestamp */
+  stop: Timestamp
+
+  /** Duration of transit from start to stop time, measured in seconds (s) */
+  duration: Seconds
+}
+
+// <--------------------------------------------------------------------------->
+// CONFIGURATION
+// <--------------------------------------------------------------------------->
 
 export interface SatelliteObservationOptions {
   /**
@@ -208,7 +242,31 @@ export interface SatelliteObservationOptions {
   orbitPhaseAngularUnits?: AngularUnits
 }
 
-export interface SatelliteTransitOptions extends SatelliteObservationOptions {
+export interface SatelliteTransitOptions {
+  /**
+   * Configures the angular units for azimuth angles, options are Degrees or 
+   * Radians.
+   */
+  azimuthAngularUnits?: AngularUnits
+
+  /**
+   * Configures the angular units for elevation angles, options are Degrees or 
+   * Radians.
+   */
+  elevationAngularUnits?: AngularUnits
+
+  /**
+   * Configures the angular units geodetic coordinates are defined in, either
+   * Degress or Radians.
+   */
+  geodeticAngularUnits?: AngularUnits
+
+  /**
+   * Confgures the output format of timestamp fields, options are Unix, ISO8601,
+   * Date, or DateTime objects.
+   */
+  timestampFormat?: TimestampFormat
+
   /**
    * Angular convergence tolerance in radians for the AOS, LOS, and horizon
    * crossing events. The refinement stops once the satellite's elevation is
@@ -232,6 +290,36 @@ export interface SatelliteTransitOptions extends SatelliteObservationOptions {
 
   /**
    * Maximum number of secant iterations allowed per event before the search
+   * gives up on converging and falls back to the best estimate found so far.
+   */
+  maxIterations?: number
+
+  /**
+   * Optional override for the coarse-search step size, expressed in seconds.
+   * When omitted, the step size is derived dynamically from the satellite's
+   * mean motion (mirroring Skyfield), which yields roughly 20 samples per
+   * orbital revolution.
+   */
+  coarseStepSeconds?: Seconds
+}
+
+export interface SatelliteSunEventOptions {
+  /**
+   * Angular convergence tolerance in radians for the eclipse-boundary crossings
+   * (sunlit <-> transition and transition <-> eclipse). The Brent refinement
+   * stops once the angular-separation offset is within this many radians of the
+   * boundary.
+   */
+  angularToleranceRadians?: Radians
+
+  /**
+   * Confgures the output format of timestamp fields, options are Unix, ISO8601,
+   * Date, or DateTime objects.
+   */
+  timestampFormat?: TimestampFormat
+
+  /**
+   * Maximum number of Brent iterations allowed per event before the search
    * gives up on converging and falls back to the best estimate found so far.
    */
   maxIterations?: number

@@ -1,9 +1,11 @@
 import {
   satelliteObservation,
   satelliteTransits,
+  satelliteSunEvents,
   OrbitMeanElementsMessage,
   TwoLineElement,
   SatelliteTransit,
+  SatelliteSunEvent,
 } from '../src/lib/main'
 import { DateTime, Duration } from 'luxon'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -46,7 +48,7 @@ type BenchmarkTarget = {
  * Load every OMM (*.json) resource from resources/omm.
  */
 function loadOmmTargets(): BenchmarkTarget[] {
-  const dir = join(__dirname, 'resources', 'omm')
+  const dir = join(__dirname, 'resources')
   return readResourceFiles(dir, '.json').map((file) => {
     const omm = JSON.parse(readFileSync(file, 'utf-8')) as OrbitMeanElementsMessage
     return {
@@ -65,7 +67,7 @@ function loadOmmTargets(): BenchmarkTarget[] {
  * bare 2-line element set or a 3-line set including the satellite name.
  */
 function loadTleTargets(): BenchmarkTarget[] {
-  const dir = join(__dirname, 'resources', 'tle')
+  const dir = join(__dirname, 'resources')
   return readResourceFiles(dir, '.tle', '.txt').map((file) => {
     const tle = readFileSync(file, 'utf-8').trim()
     const lines = tle.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -229,6 +231,70 @@ function reportTransitMetrics(transits: SatelliteTransit[]): void {
   describeTransit('Shortest transit', shortestTransit)
 }
 
+/**
+ * Benchmark how long it takes to generate 30 days worth of satellite sun events
+ * (sunlit / transition / eclipse intervals).
+ */
+function benchmarkSunEvents(target: BenchmarkTarget): void {
+  const sunEventStart = DateTime.fromISO(target.epoch, { zone: 'utc' })
+  const sunEventEnd = sunEventStart.plus(Duration.fromObject({ days: 30 }))
+
+  console.log('\n=== Satellite Sun Event Benchmark ===')
+  console.log('Inputs:')
+  console.log(`    satellite:      ${target.name} (NORAD ${target.noradId})`)
+  console.log(`    source:         ${target.kind.toUpperCase()} (${target.label})`)
+  console.log(`    startTime:      ${sunEventStart.toISO()}`)
+  console.log(`    stopTime:       ${sunEventEnd.toISO()}`)
+  console.log(`    window:         ${sunEventEnd.diff(sunEventStart, 'days').days} days`)
+  console.log('')
+
+  const sunEventBenchmarkStart = performance.now()
+  const sunEvents = satelliteSunEvents(
+    target.elements as OrbitMeanElementsMessage,
+    sunEventStart,
+    sunEventEnd,
+  )
+  const sunEventBenchmarkDuration = performance.now() - sunEventBenchmarkStart
+
+  console.log(`\nGenerated ${sunEvents.length} satellite sun events over 30 days in ${sunEventBenchmarkDuration.toFixed(2)} ms`)
+  if (sunEvents.length > 0) {
+    console.log(`Average: ${(sunEventBenchmarkDuration / sunEvents.length).toFixed(4)} ms/event`)
+    console.log(`Throughput: ${Math.round(sunEvents.length / (sunEventBenchmarkDuration / 1000)).toLocaleString()} events/sec`)
+  }
+
+  reportSunEventMetrics(sunEvents)
+}
+
+/**
+ * Aggregate and print sun event metrics across all sun events.
+ */
+function reportSunEventMetrics(sunEvents: SatelliteSunEvent[]): void {
+  if (sunEvents.length === 0) {
+    return
+  }
+
+  const totals: Record<string, { count: number; duration: number }> = {}
+  for (const event of sunEvents) {
+    const bucket = totals[event.eventType] ?? { count: 0, duration: 0 }
+    bucket.count += 1
+    bucket.duration += event.duration
+    totals[event.eventType] = bucket
+  }
+
+  const totalDuration = sunEvents.reduce((sum, e) => sum + e.duration, 0)
+
+  console.log(`\n--- Sun Event Metrics (${sunEvents.length} events over 30 days) ---`)
+  for (const [eventType, bucket] of Object.entries(totals)) {
+    const percentage = totalDuration > 0 ? (bucket.duration / totalDuration) * 100 : 0
+    console.log(
+      `${eventType.padEnd(11)} count=${String(bucket.count).padStart(4)}  ` +
+        `total=${(bucket.duration / 60).toFixed(2).padStart(10)} min  ` +
+        `avg=${(bucket.duration / bucket.count).toFixed(2).padStart(8)} s  ` +
+        `(${percentage.toFixed(2)}% of window)`,
+    )
+  }
+}
+
 // <--------------------------------------------------------------------------->
 // Entry point: discover every resource file and run both benchmarks against it.
 // <--------------------------------------------------------------------------->
@@ -249,4 +315,5 @@ for (const target of targets) {
 
   benchmarkObservations(target)
   benchmarkTransits(target)
+  benchmarkSunEvents(target)
 }

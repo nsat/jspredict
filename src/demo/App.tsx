@@ -11,18 +11,24 @@ import {
 import {
   satelliteObservation,
   satelliteTransits,
+  satelliteSunEvents,
+  SatelliteSunEventType,
   TimestampFormat,
 } from "../lib/main"
 import type {
   Position,
   SatelliteObservation,
+  SatelliteSunEvent,
   SatelliteTransit,
   TransitEvent,
 } from "../lib/main"
 import {
   formatAngle,
   formatDuration,
+  formatEclipseFactor,
   formatRange,
+  formatSunEventType,
+  formatSunlit,
   formatTime,
   msToWallClock,
   parseElementSet,
@@ -134,6 +140,18 @@ function EventDetails({
                       {formatRange(event.slantRange)}
                     </dd>
                   </div>
+                  <div className="flex flex-col">
+                    <dt>Illumination</dt>
+                    <dd className="text-foreground">
+                      {formatSunlit(event.sunlit)}
+                    </dd>
+                  </div>
+                  <div className="flex flex-col">
+                    <dt>Eclipse</dt>
+                    <dd className="text-foreground">
+                      {formatEclipseFactor(event.eclipseFactor)}
+                    </dd>
+                  </div>
                 </dl>
               </div>
             )
@@ -206,6 +224,43 @@ function TransitRow({
         </TableRow>
       )}
     </>
+  )
+}
+
+/** A colored pill indicating the sun event regime. */
+function SunEventBadge({ eventType }: { eventType: SatelliteSunEventType }) {
+  const tone =
+    eventType === SatelliteSunEventType.Sunlit
+      ? "border-amber-500/40 text-amber-500"
+      : eventType === SatelliteSunEventType.Eclipse
+        ? "border-slate-500/40 text-slate-400"
+        : "border-sky-500/40 text-sky-400"
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-xs ${tone}`}>
+      {formatSunEventType(eventType)}
+    </span>
+  )
+}
+
+function SunEventRow({
+  event,
+  index,
+  tz,
+}: {
+  event: SatelliteSunEvent
+  index: number
+  tz: TimeZoneMode
+}) {
+  return (
+    <TableRow>
+      <TableCell>{index + 1}</TableCell>
+      <TableCell>
+        <SunEventBadge eventType={event.eventType} />
+      </TableCell>
+      <TableCell>{formatTime(event.start as string, tz)}</TableCell>
+      <TableCell>{formatTime(event.stop as string, tz)}</TableCell>
+      <TableCell>{formatDuration(event.duration)}</TableCell>
+    </TableRow>
   )
 }
 
@@ -441,7 +496,9 @@ export default function App() {
   const [computing, setComputing] = useState(false)
 
   // Which mode's controls/results are active.
-  const [mode, setMode] = useState<"transits" | "observation">("observation")
+  const [mode, setMode] = useState<"transits" | "observation" | "sunEvents">(
+    "observation",
+  )
 
   const [resultName, setResultName] = useState<string | null>(null)
   const [transits, setTransits] = useState<SatelliteTransit[] | null>(null)
@@ -450,6 +507,10 @@ export default function App() {
   )
   const [obsStatus, setObsStatus] = useState<Status>(null)
   const [observing, setObserving] = useState(false)
+
+  const [sunEvents, setSunEvents] = useState<SatelliteSunEvent[] | null>(null)
+  const [sunStatus, setSunStatus] = useState<Status>(null)
+  const [computingSun, setComputingSun] = useState(false)
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -483,6 +544,8 @@ export default function App() {
     setTransits(null)
     setObservation(null)
     setObsStatus(null)
+    setSunEvents(null)
+    setSunStatus(null)
     if (fileRef.current) fileRef.current.value = ""
   }
 
@@ -649,6 +712,47 @@ export default function App() {
     }
   }
 
+  function computeSunEvents() {
+    setSunEvents(null)
+    setResultName(null)
+    try {
+      const { elements: parsed, name } = parseElementSet(elements)
+
+      const days = DURATION_DAYS[duration] ?? 1
+      const start = new Date(startMs)
+      const stop = new Date(startMs + days * 24 * 60 * 60 * 1000)
+
+      setComputingSun(true)
+      setSunStatus({
+        message: `Computing sun events for ${days} day${days === 1 ? "" : "s"}\u2026`,
+        kind: "info",
+      })
+
+      // Defer so the status paints before the (potentially heavy) computation.
+      setTimeout(() => {
+        try {
+          const t0 = performance.now()
+          const result = satelliteSunEvents(parsed, start, stop, {
+            timestampFormat: TimestampFormat.ISO8601,
+          })
+          const elapsed = Math.round(performance.now() - t0)
+          setResultName(name)
+          setSunEvents(result)
+          setSunStatus({
+            message: `Found ${result.length} sun event${result.length === 1 ? "" : "s"} in ${elapsed} ms.`,
+            kind: "success",
+          })
+        } catch (err) {
+          setSunStatus({ message: (err as Error).message, kind: "error" })
+        } finally {
+          setComputingSun(false)
+        }
+      }, 0)
+    } catch (err) {
+      setSunStatus({ message: (err as Error).message, kind: "error" })
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-5xl px-6 py-10">
@@ -659,7 +763,8 @@ export default function App() {
             </h1>
             <p className="text-muted-foreground text-sm">
               Upload or paste a TLE or OMM, set an observer location, then
-              compute satellite transits or a point-in-time observation.
+              compute satellite transits, a point-in-time observation, or sun
+              events.
             </p>
           </div>
         </header>
@@ -765,11 +870,14 @@ export default function App() {
 
           <Tabs
             value={mode}
-            onValueChange={(v) => setMode(v as "transits" | "observation")}
+            onValueChange={(v) =>
+              setMode(v as "transits" | "observation" | "sunEvents")
+            }
           >
             <TabsList>
               <TabsTrigger value="observation">Observation</TabsTrigger>
               <TabsTrigger value="transits">Transits</TabsTrigger>
+              <TabsTrigger value="sunEvents">Sun Events</TabsTrigger>
             </TabsList>
 
             {/* ---------------------------- Transits ---------------------------- */}
@@ -951,6 +1059,119 @@ export default function App() {
                         <ObservationView observation={observation} tz={timezone} />
                       </>
                     )}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ---------------------------- Sun Events ---------------------------- */}
+            <TabsContent value="sunEvents" className="grid gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Compute Satellite Sun Events</CardTitle>
+                  <CardDescription>
+                    Split the selected time window into contiguous sunlit,
+                    transition (penumbra), and eclipse (umbra) intervals. The
+                    observer location is not used for this calculation.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <DateTimePicker
+                      value={msToWallClock(startMs, timezone)}
+                      dateLabel="Start Date"
+                      timeLabel={`Start Time (${timezoneLabel(timezone)})`}
+                      onChange={(wall) => {
+                        startEditedRef.current = true
+                        setStartMs(wallClockToMs(wall, timezone))
+                      }}
+                    />
+                    <div className="grid gap-2">
+                      <Label htmlFor="duration-sun">Duration</Label>
+                      <Select value={duration} onValueChange={setDuration}>
+                        <SelectTrigger id="duration-sun" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 day</SelectItem>
+                          <SelectItem value="7">7 days</SelectItem>
+                          <SelectItem value="30">30 days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="timezone-sun">Timezone</Label>
+                      <Select
+                        value={timezone}
+                        onValueChange={(v) => setTimezone(v as TimeZoneMode)}
+                      >
+                        <SelectTrigger id="timezone-sun" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local">
+                            Local time ({timezoneLabel("local")})
+                          </SelectItem>
+                          <SelectItem value="utc">UTC</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button onClick={computeSunEvents} disabled={computingSun}>
+                      Compute Sun Events
+                    </Button>
+                    <StatusText status={sunStatus} />
+                  </div>
+
+                  <hr className="border-border" />
+
+                  <div className="grid gap-3">
+                    {sunEvents && (
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-sm font-semibold">{resultName}</h3>
+                        <span className="text-muted-foreground rounded-full border px-2.5 py-0.5 text-xs">
+                          {sunEvents.length} event
+                          {sunEvents.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    )}
+                    {sunEvents && sunEvents.length > 0 && (
+                      <p className="text-muted-foreground text-sm">
+                        Times shown in{" "}
+                        {timezone === "utc"
+                          ? "UTC"
+                          : `your local timezone (${timezoneLabel("local")})`}
+                        . Each event's stop is the next event's start.
+                      </p>
+                    )}
+                    {sunEvents && sunEvents.length === 0 ? (
+                      <p className="text-muted-foreground text-sm">
+                        No sun events found for the selected window.
+                      </p>
+                    ) : sunEvents && sunEvents.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>#</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Start</TableHead>
+                            <TableHead>Stop</TableHead>
+                            <TableHead>Duration</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {sunEvents.map((e, i) => (
+                            <SunEventRow
+                              key={i}
+                              event={e}
+                              index={i}
+                              tz={timezone}
+                            />
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
