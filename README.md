@@ -29,17 +29,18 @@ JsPredict is published as an ES module and ships with TypeScript type
 definitions.
 
 ```ts
-import { satelliteObservation, satelliteTransits } from "@nsat/jspredict"
+import { satelliteObservation, satelliteTransits, satelliteSunEvents } from "@nsat/jspredict"
 ```
 
 ## Concepts
 
-JsPredict exposes two primary functions:
+JsPredict exposes three primary functions:
 
 | Function | Purpose |
 | --- | --- |
 | `satelliteObservation` | Compute the state of a satellite (position, velocity, orbit, sun geometry, and optional observer look angles) at one or more instants in time. |
 | `satelliteTransits` | Find every pass a satellite makes over a fixed ground location within a time window, including AOS, LOS, peak, and time of closest approach. |
+| `satelliteSunEvents` | Split a time window into contiguous intervals of the satellite's sunlight regime: sunlit, transition (penumbra), and eclipse (umbra). |
 
 ### Satellite element sets
 
@@ -482,10 +483,14 @@ Where `aos`, `los`, `tca`, and `peak` are `TransitEvent` objects defined as:
 | Field | Description |
 | --- | --- |
 | `epoch` | The date and time of the event. |
+| `position` | The satellite position coordinates (ECI, ECEF, and geodetic) at the event epoch. |
+| `velocity` | The satellite velocity vectors (ECI and ECEF) at the event epoch. |
 | `azimuth` | The compass heading of the satellite from the observer. |
 | `elevation` | The elevation angle of the satellite from the observer. |
 | `slantRange` | The straight-line distance of the satellite from the observer. |
 | `dopplerFactor` | The frequency shift of the satellite signal relative to the observer. |
+| `sunlit` | Whether the satellite is illuminated by the Sun (`true`) or in eclipse (`false`) at the event epoch. |
+| `eclipseFactor` | The fraction of the Sun's disc obscured by the Earth as seen from the satellite (`0` = fully lit, `1` = umbra). |
 
 ### Errors and warnings
 
@@ -496,13 +501,101 @@ Where `aos`, `los`, `tca`, and `peak` are `TransitEvent` objects defined as:
 - Returns `[]` and warns if the satellite has decayed, or if it is
   geostationary but sits below `minElevationAngle` for the observer.
 
+## `satelliteSunEvents`
+
+```ts
+satelliteSunEvents(
+  satelliteElements,        // TLE string | OMM object
+  startTime,                // Timestamp
+  stopTime,                 // Timestamp
+  satelliteSunEventOptions?, // options object (optional)
+): SatelliteSunEvent[]
+```
+
+Splits the window between `startTime` and `stopTime` into contiguous intervals
+of the satellite's sunlight regime. The satellite's illumination — measured by
+its eclipse factor (the fraction of the Sun's disc obscured by the Earth) — is
+classified into three regimes:
+
+| Regime | Meaning | Eclipse factor |
+| --- | --- | --- |
+| `SUNLIT` | Fully illuminated | `0` |
+| `TRANSITION` | Partial shadow (penumbra) | `0 < f < 1` |
+| `ECLIPSE` | Full shadow (umbra) | `1` |
+
+The returned events tile the entire window with no gaps: each event's `stop`
+coincides exactly with the next event's `start` (overlapping timestamps). The
+first event begins at `startTime` and the last ends at `stopTime`, unless the
+orbit decays within the window, in which case the final event ends at the decay
+time. Regime boundaries are located with Brent's method.
+
+### Basic usage
+
+```ts
+import { satelliteSunEvents } from "@nsat/jspredict"
+
+const sunEvents = satelliteSunEvents(
+  issOmm,
+  "2026-08-07T01:00:00Z",
+  "2026-08-07T02:30:00Z",
+)
+
+for (const event of sunEvents) {
+  console.log(event.eventType, event.start, "->", event.stop, `(${event.duration}s)`)
+}
+```
+
+```console
+SUNLIT 2026-08-07T01:00:00.000Z -> 2026-08-07T01:23:14.747Z (1394.748s)
+TRANSITION 2026-08-07T01:23:14.747Z -> 2026-08-07T01:23:25.106Z (10.359s)
+ECLIPSE 2026-08-07T01:23:25.106Z -> 2026-08-07T01:56:50.250Z (2005.144s)
+TRANSITION 2026-08-07T01:56:50.250Z -> 2026-08-07T01:57:00.598Z (10.348s)
+SUNLIT 2026-08-07T01:57:00.598Z -> 2026-08-07T02:30:00.000Z (1979.402s)
+```
+
+### Result Schema
+
+Each `SatelliteSunEvent` object contains the following fields:
+
+| Field | Description |
+| --- | --- |
+| `eventType` | The sunlight regime for the interval (`SUNLIT`, `TRANSITION`, or `ECLIPSE`). |
+| `start` | Interval start time (formatted per `timestampFormat`). |
+| `stop` | Interval stop time. Equals the next event's `start`. |
+| `duration` | Seconds from `start` to `stop`. |
+
+`eventType` values come from the exported `SatelliteSunEventType` enum:
+
+```ts
+import { SatelliteSunEventType } from "@nsat/jspredict"
+
+enum SatelliteSunEventType {
+  Sunlit = "SUNLIT",
+  Transition = "TRANSITION",
+  Eclipse = "ECLIPSE",
+}
+```
+
+### Errors and warnings
+
+- Throws `Stop date is less than or equal to start date` if
+  `stopTime <= startTime`.
+- Emits a `console.warn` when the search window begins before the element set's
+  epoch (propagating before the satellite element's epoch is not recommended).
+- Returns `[]` and warns if the satellite has already decayed at `startTime`.
+
 ## Configuration options
 
-Both functions accept a "options" object for configuring inputs and outputs:
+Each function accepts an "options" object for configuring inputs and outputs:
 - `satelliteObservation` uses `SatelliteObservationOptions`
 - `satelliteTransits` uses `SatelliteTransitOptions`
+- `satelliteSunEvents` uses `SatelliteSunEventOptions`
 
-### Unit and format options (both functions)
+### Unit and format options
+
+`satelliteObservation` and `satelliteTransits` accept the following unit and
+format options. `satelliteSunEvents` accepts only `timestampFormat` (its output
+contains no angular fields).
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -538,7 +631,15 @@ enum TimestampFormat {
 | `elevationToleranceRadians` | `number` | `1e-6` | Angular convergence tolerance (radians) for AOS, LOS, and horizon crossings. |
 | `elevationRateTolerance` | `number` | `1e-6` | Rate tolerance (rad/s) for locating the peak (culmination). |
 | `slantRangeRateTolerance` | `number` | `1e-4` | Rate tolerance (km/s) for locating the time of closest approach. |
-| `maxIterations` | `number` | `100` | Maximum secant iterations per event before falling back to the best estimate. |
+| `maxIterations` | `number` | `100` | Maximum Brent iterations per event before falling back to the best estimate. |
+| `coarseStepSeconds` | `number` | `undefined` | Override for the coarse-search step size. When omitted, the step is derived from the satellite's mean motion (~20 samples per revolution). |
+
+### Sun event options (`satelliteSunEvents` only)
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `angularToleranceRadians` | `number` | `1e-6` | Angular convergence tolerance (radians) for the sunlit/transition and transition/eclipse boundary crossings. |
+| `maxIterations` | `number` | `100` | Maximum Brent iterations per boundary before falling back to the best estimate. |
 | `coarseStepSeconds` | `number` | `undefined` | Override for the coarse-search step size. When omitted, the step is derived from the satellite's mean motion (~20 samples per revolution). |
 
 ### Example: radians and Unix timestamps
@@ -602,6 +703,8 @@ const transits = satelliteTransits(
   is supplied.
 - `satelliteTransits` uses a `minElevationAngle` of **0°** (true horizon) and
   derives its coarse search step dynamically from the satellite's mean motion.
+- `satelliteSunEvents` returns events covering the entire window and derives its
+  coarse search step dynamically from the satellite's mean motion.
 
 ## Migrating from the legacy 1.2 release
 

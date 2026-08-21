@@ -15,8 +15,8 @@ import {
   radiansLong,
 } from 'satellite.js'
 
-import { SatelliteObservation, satelliteObservation, satelliteTransits } from '../main'
-import { AngularUnits, TimestampFormat } from '../enums'
+import { SatelliteObservation, satelliteObservation, satelliteSunEvents, satelliteTransits } from '../main'
+import { AngularUnits, SatelliteSunEventType, TimestampFormat } from '../enums'
 import { convertTleToOmm, dopplerFactorEcf, footprintDiameter } from '../utils'
 
 // <--------------------------------------------------------------------------->
@@ -395,6 +395,25 @@ describe('satelliteTransits', () => {
       expect(transit.peak.elevation).toBeGreaterThanOrEqual(transit.los.elevation - 1e-6)
       expect(transit.tca.slantRange).toBeLessThanOrEqual(transit.aos.slantRange + 1e-6)
       expect(transit.tca.slantRange).toBeLessThanOrEqual(transit.los.slantRange + 1e-6)
+
+      // Each transit event exposes the satellite position/velocity vectors and
+      // illumination state at the event epoch.
+      ;([transit.aos, transit.los, transit.peak, transit.tca] as const).forEach((event) => {
+        expect(event.position).toBeDefined()
+        expect(event.position.eci).toBeDefined()
+        expect(event.position.ecef).toBeDefined()
+        expect(event.velocity).toBeDefined()
+        expect(event.velocity.eci).toBeDefined()
+        expect(typeof event.sunlit).toBe('boolean')
+        expect(event.eclipseFactor).toBeGreaterThanOrEqual(0)
+        expect(event.eclipseFactor).toBeLessThanOrEqual(1)
+        expect(event.sunlit).toBe(event.eclipseFactor < 1)
+      })
+
+      expect(transit.aos.position.eci!.x).toBeCloseTo(aosObservation.position.eci.x, 6)
+      expect(transit.aos.velocity.eci!.x).toBeCloseTo(aosObservation.velocity.eci.x, 6)
+      expect(transit.aos.sunlit).toBe(aosObservation.sunlit)
+      expect(transit.aos.eclipseFactor).toBeCloseTo(aosObservation.eclipseFactor, 6)
     })
   })
 
@@ -436,6 +455,142 @@ describe('satelliteTransits', () => {
         transitWindowStop,
         transitWindowStart,
         observerPosition,
+      ),
+    ).toThrow('Stop date is less than or equal to start date')
+  })
+})
+
+describe('satelliteSunEvents', () => {
+  const validRegimes = [
+    SatelliteSunEventType.Sunlit,
+    SatelliteSunEventType.Transition,
+    SatelliteSunEventType.Eclipse,
+  ]
+
+  test('tiles the entire window contiguously with overlapping timestamps', () => {
+    const events = satelliteSunEvents(
+      issOmm as OMMJsonObjectV3,
+      transitWindowStart,
+      transitWindowStop,
+    )
+
+    expect(events.length).toBeGreaterThan(0)
+
+    const windowStartMs = DateTime.fromISO(transitWindowStart, { zone: 'utc' }).toMillis()
+    const windowStopMs = DateTime.fromISO(transitWindowStop, { zone: 'utc' }).toMillis()
+
+    // First event begins at the window start; last event ends at the window stop.
+    expect(timestampToMillis(events[0].start)).toBeCloseTo(windowStartMs, -1)
+    expect(timestampToMillis(events[events.length - 1].stop)).toBeCloseTo(windowStopMs, -1)
+
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i]
+      const startMs = timestampToMillis(event.start)
+      const stopMs = timestampToMillis(event.stop)
+
+      // Each event is a valid, non-empty interval with a matching duration.
+      expect(validRegimes).toContain(event.eventType)
+      expect(stopMs).toBeGreaterThan(startMs)
+      expect(Math.abs(event.duration - (stopMs - startMs) / 1000)).toBeLessThan(0.002)
+
+      // Overlapping timestamps: this event's stop is the next event's start.
+      if (i + 1 < events.length) {
+        const nextStartMs = timestampToMillis(events[i + 1].start)
+        expect(nextStartMs).toBeCloseTo(stopMs, 6)
+      }
+    }
+  })
+
+  test('adjacent events never share the same regime and are correctly classified', () => {
+    const events = satelliteSunEvents(
+      issOmm as OMMJsonObjectV3,
+      transitWindowStart,
+      transitWindowStop,
+    )
+
+    for (let i = 0; i < events.length; i++) {
+      // Consecutive segments of the same regime should have been merged.
+      if (i + 1 < events.length) {
+        expect(events[i].eventType).not.toBe(events[i + 1].eventType)
+      }
+
+      // The regime reported must match a fresh observation at the interval
+      // midpoint (well away from the boundaries).
+      const startMs = timestampToMillis(events[i].start)
+      const stopMs = timestampToMillis(events[i].stop)
+      const midMs = (startMs + stopMs) / 2
+
+      const observation = satelliteObservation(
+        issOmm as OMMJsonObjectV3,
+        DateTime.fromMillis(midMs, { zone: 'utc' }).toISO()!,
+      ) as SatelliteObservation
+
+      const factor = observation.eclipseFactor as number
+      const expectedRegime = factor <= 0
+        ? SatelliteSunEventType.Sunlit
+        : factor >= 1
+          ? SatelliteSunEventType.Eclipse
+          : SatelliteSunEventType.Transition
+
+      expect(events[i].eventType).toBe(expectedRegime)
+    }
+  })
+
+  test('a sunlit <-> eclipse change always has a transition event between them', () => {
+    const events = satelliteSunEvents(
+      issOmm as OMMJsonObjectV3,
+      transitWindowStart,
+      transitWindowStop,
+    )
+
+    for (let i = 0; i + 1 < events.length; i++) {
+      const a = events[i].eventType
+      const b = events[i + 1].eventType
+      const isSunlitEclipsePair =
+        (a === SatelliteSunEventType.Sunlit && b === SatelliteSunEventType.Eclipse) ||
+        (a === SatelliteSunEventType.Eclipse && b === SatelliteSunEventType.Sunlit)
+      // Sunlit and Eclipse are never directly adjacent — Transition separates them.
+      expect(isSunlitEclipsePair).toBe(false)
+    }
+  })
+
+  test('respects a coarse step override', () => {
+    const events = satelliteSunEvents(
+      issOmm as OMMJsonObjectV3,
+      transitWindowStart,
+      transitWindowStop,
+      { coarseStepSeconds: 30 },
+    )
+    expect(events.length).toBeGreaterThan(0)
+  })
+
+  test.each([
+    TimestampFormat.ISO8601,
+    TimestampFormat.Unix,
+    TimestampFormat.Date,
+    TimestampFormat.DateTime,
+  ])('formats event timestamps as %s', (timestamp) => {
+    const events = satelliteSunEvents(
+      issOmm as OMMJsonObjectV3,
+      transitWindowStart,
+      transitWindowStop,
+      { timestampFormat: timestamp },
+    )
+
+    expect(events.length).toBeGreaterThan(0)
+
+    events.forEach((event) => {
+      expectTimestampFormat(event.start, timestamp)
+      expectTimestampFormat(event.stop, timestamp)
+    })
+  })
+
+  test('throws when the time range is invalid', () => {
+    expect(() =>
+      satelliteSunEvents(
+        issOmm as OMMJsonObjectV3,
+        transitWindowStop,
+        transitWindowStart,
       ),
     ).toThrow('Stop date is less than or equal to start date')
   })

@@ -1,6 +1,6 @@
 import { AstronomialUnits } from "./types";
 import { Kilometer } from "satellite.js";
-import { SatelliteObservationOptions, SatelliteTransitOptions } from "./interfaces";
+import { SatelliteObservationOptions, SatelliteSunEventOptions, SatelliteTransitOptions } from "./interfaces";
 import { TimestampFormat, AngularUnits } from "./enums";
 
 /** Astronomical Unit - km (IAU 76) */
@@ -70,6 +70,16 @@ export const defaultSatelliteTransitOptions: SatelliteTransitOptions = {
   elevationToleranceRadians: 1e-6,
   elevationRateTolerance: 1e-6,
   slantRangeRateTolerance: 1e-4,
+  maxIterations: 100,
+  coarseStepSeconds: undefined
+}
+
+/**
+ * Satellite sun event default options
+ */
+export const defaultSatelliteSunEventOptions: SatelliteSunEventOptions = {
+  angularToleranceRadians: 1e-6,
+  timestampFormat: TimestampFormat.ISO8601,
   maxIterations: 100,
   coarseStepSeconds: undefined
 }

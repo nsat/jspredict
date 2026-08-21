@@ -11,3 +11,10 @@ export enum TimestampFormat {
   Date = 'DATE',
   DateTime = 'DATETIME'
 }
+
+/** Satellite sun event types */
+export enum SatelliteSunEventType {
+  Sunlit = 'SUNLIT',
+  Transition = 'TRANSITION',
+  Eclipse = 'ECLIPSE'
+}

@@ -28,13 +28,15 @@
 // OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-import { AngularUnits, TimestampFormat } from "./enums"
+import { AngularUnits, SatelliteSunEventType, TimestampFormat } from "./enums"
 import { DateTime } from "luxon"
-import { defaultSatelliteTransitOptions, deg2rad } from "./constants"
+import { defaultSatelliteSunEventOptions, defaultSatelliteTransitOptions, deg2rad } from "./constants"
 import {
   Position,
   SatelliteObservation,
   SatelliteObservationOptions,
+  SatelliteSunEvent,
+  SatelliteSunEventOptions,
   SatelliteTransit,
   SatelliteTransitOptions,
 } from "./interfaces"
@@ -53,9 +55,13 @@ import {
   formatTimestamp,
   parseSatelliteElements,
   parseTimestamp,
-  secantExtremum,
-  secantMethod,
-  findHorizonCrossing
+  brentExtremum,
+  brentMethod,
+  findHorizonCrossing,
+  findDecayTime,
+  eclipseBoundaryValueAt,
+  eclipseRegimeAt,
+  EclipseBoundary,
 } from "./utils"
 import {
   Degrees,
@@ -266,7 +272,7 @@ export function satelliteTransits(
     const peakBracketAMs = cursorMs
     const peakBracketBMs = nextMs
 
-    const peakMs = secantExtremum(
+    const peakMs = brentExtremum(
       (ms) => elevationRate(ms),
       peakBracketAMs,
       peakBracketBMs,
@@ -305,7 +311,7 @@ export function satelliteTransits(
       if (clampedMs === startMs) break
     }
 
-    const aosMs = secantMethod(
+    const aosMs = brentMethod(
       (ms) => elevationRelativeTo(satrec, observerGeodeticRadians, ms, minElevationRadians),
       aosBracketMs,
       peakMs,
@@ -331,7 +337,7 @@ export function satelliteTransits(
       if (clampedMs === stopMs) break
     }
 
-    const losMs = secantMethod(
+    const losMs = brentMethod(
       (ms) => elevationRelativeTo(satrec, observerGeodeticRadians, ms, minElevationRadians),
       peakMs,
       losBracketMs,
@@ -395,7 +401,7 @@ export function satelliteTransits(
       const after = slantRange(ms + rateDeltaMs)
       return ((after - before) / (2 * rateDeltaMs)) * msPerSecond
     }
-    const tcaMs = secantExtremum(
+    const tcaMs = brentExtremum(
       (ms) => rangeRate(ms),
       peakBracketAMs,
       peakBracketBMs,
@@ -439,6 +445,232 @@ export function satelliteTransits(
   return transits
 }
 
+/**
+ * Calculate the satellite's sunlight regime intervals over a time range.
+ *
+ * The satellite's illumination is classified by its eclipse factor (the
+ * fraction of the Sun's disc obscured by the Earth) into three contiguous
+ * regimes:
+ *
+ *   - SUNLIT     — fully illuminated (eclipseFactor == 0)
+ *   - TRANSITION — partial shadow / penumbra (0 < eclipseFactor < 1)
+ *   - ECLIPSE    — full shadow / umbra (eclipseFactor == 1)
+ *
+ * The returned events tile the entire [startTime, stopTime] window with no
+ * gaps, each event's `stop` coinciding exactly with the next event's `start`
+ * (overlapping timestamps). The first event begins at `startTime` and the last
+ * ends at `stopTime`, unless the orbit decays within the window, in which case
+ * the final event ends at the decay time and the scan stops.
+ *
+ * Regime boundaries are located by rooting the angular-separation offset that
+ * `shadowFraction` uses internally — `d - (rE + rS)` for the sunlit/transition
+ * boundary and `d - (rE - rS)` for the transition/eclipse boundary — with
+ * Brent's method. Those offsets cross zero cleanly at the boundary, whereas the
+ * eclipse factor itself is flat (exactly 0 or 1) outside the penumbra and so
+ * cannot be bracketed directly.
+ *
+ * @param satelliteElements a TLE or OMM of the satellite's orbital elements
+ * @param startTime a timestamp representing the start of the window
+ * @param stopTime a timestamp representing the end of the window
+ * @param satelliteSunEventOptions (optional) tunable convergence tolerance, max
+ *    iterations, and coarse-step override
+ */
+export function satelliteSunEvents(
+  satelliteElements: TwoLineElement | OrbitMeanElementsMessage,
+  startTime: Timestamp,
+  stopTime: Timestamp,
+  satelliteSunEventOptions?: SatelliteSunEventOptions
+): SatelliteSunEvent[] {
+  // Configure options
+  const options = { ...defaultSatelliteSunEventOptions, ...satelliteSunEventOptions }
+
+  const startDateTime = parseTimestamp(startTime)
+  const stopDateTime = parseTimestamp(stopTime)
+
+  // Check for invalid inputs
+  if (stopDateTime <= startDateTime) {
+    throw new Error('Stop date is less than or equal to start date')
+  }
+
+  // Parse the satellite elements
+  const [omm, satrec] = parseSatelliteElements(satelliteElements)
+  const ommEpochDateTime = parseTimestamp(omm.EPOCH)
+
+  // Warn about propagating before OMM epoch
+  if (startDateTime < ommEpochDateTime) {
+    console.warn('Propagating satellite sun event times prior to TLE/OMM epoch is not recommended')
+  }
+
+  const startMs = startDateTime.toMillis()
+  const stopMs = stopDateTime.toMillis()
+
+  // Coarse step (seconds -> ms). Unless overridden, derive from mean motion so
+  // there are ~20 samples per revolution — far finer than the shortest eclipse
+  // regime, so no boundary crossing is skipped.
+  const stepSeconds = options.coarseStepSeconds ?? dynamicStepSeconds(Number(omm.MEAN_MOTION))
+  const stepMs = stepSeconds * 1000
+
+  const angularTolerance = options.angularToleranceRadians!
+  const maxIterations = options.maxIterations!
+
+  // Refine a single boundary crossing between two bracketing times using Brent's
+  // method on the appropriate angular-separation offset.
+  const refineBoundary = (aMs: number, bMs: number, boundary: EclipseBoundary): number =>
+    brentMethod(
+      (ms) => eclipseBoundaryValueAt(satrec, ms, boundary),
+      aMs,
+      bMs,
+      angularTolerance,
+      maxIterations,
+    )
+
+  // Ordering of the three regimes along the "more shadowed" axis. Moving between
+  // non-adjacent regimes (Sunlit <-> Eclipse) necessarily passes through
+  // Transition, so we always insert the intermediate boundary/regime.
+  const regimeRank = (regime: SatelliteSunEventType): number => {
+    switch (regime) {
+      case SatelliteSunEventType.Sunlit:
+        return 0
+      case SatelliteSunEventType.Transition:
+        return 1
+      case SatelliteSunEventType.Eclipse:
+        return 2
+    }
+  }
+
+  // Accumulate boundary times together with the regime that begins at each one.
+  // The first entry is always the window start with the regime observed there.
+  const initialRegime = eclipseRegimeAt(satrec, startMs)
+
+  // If the satellite is already decayed at the window start there are no events.
+  if (initialRegime === null) {
+    console.warn(`Satellite ${omm.OBJECT_ID} orbit has decayed as of: ${startDateTime.toISO()}`)
+    return []
+  }
+
+  type Segment = { startMs: number; regime: SatelliteSunEventType }
+  const segments: Segment[] = [{ startMs, regime: initialRegime }]
+
+  // Locate the boundary crossing(s) between two adjacent coarse samples of
+  // differing regime and append the resulting segment(s). Because Sunlit and
+  // Eclipse are separated by Transition, a direct Sunlit<->Eclipse change over a
+  // single coarse interval implies both the Outer and Inner boundaries lie
+  // within it; we resolve both and emit the intervening Transition segment.
+  const appendBoundaries = (
+    fromRegime: SatelliteSunEventType,
+    toRegime: SatelliteSunEventType,
+    aMs: number,
+    bMs: number,
+  ): void => {
+    const fromRank = regimeRank(fromRegime)
+    const toRank = regimeRank(toRegime)
+
+    // Build the ordered list of boundaries crossed as we move from fromRegime
+    // to toRegime, each paired with the regime entered after crossing it.
+    const crossings: { boundary: EclipseBoundary; entering: SatelliteSunEventType }[] = []
+
+    if (toRank > fromRank) {
+      // Becoming more shadowed: Sunlit -> [Outer] -> Transition -> [Inner] -> Eclipse.
+      if (fromRank < 1 && toRank >= 1) {
+        crossings.push({ boundary: EclipseBoundary.Outer, entering: SatelliteSunEventType.Transition })
+      }
+      if (fromRank < 2 && toRank >= 2) {
+        crossings.push({ boundary: EclipseBoundary.Inner, entering: SatelliteSunEventType.Eclipse })
+      }
+    } else {
+      // Becoming more sunlit: Eclipse -> [Inner] -> Transition -> [Outer] -> Sunlit.
+      if (fromRank > 1 && toRank <= 1) {
+        crossings.push({ boundary: EclipseBoundary.Inner, entering: SatelliteSunEventType.Transition })
+      }
+      if (fromRank > 0 && toRank <= 0) {
+        crossings.push({ boundary: EclipseBoundary.Outer, entering: SatelliteSunEventType.Sunlit })
+      }
+    }
+
+    // The final crossing's entered regime must equal toRegime; overwrite it so
+    // the segment regime is exactly the coarsely-observed regime.
+    if (crossings.length > 0) {
+      crossings[crossings.length - 1].entering = toRegime
+    }
+
+    for (const crossing of crossings) {
+      const crossingMs = refineBoundary(aMs, bMs, crossing.boundary)
+      const clampedMs = Math.min(Math.max(crossingMs, aMs), bMs)
+      segments.push({ startMs: clampedMs, regime: crossing.entering })
+    }
+  }
+
+  // <----------------------------------------------------------------------->
+  // COARSE SCAN
+  //
+  // Walk the window one coarse step at a time, classifying each sample's
+  // regime. On any regime change between adjacent samples, refine the boundary
+  // crossing(s) with Brent's method. If a sample cannot be propagated the orbit
+  // has decayed: the scan stops and the trailing segment is truncated there.
+  // <----------------------------------------------------------------------->
+
+  let prevMs = startMs
+  let prevRegime = initialRegime
+  let decayMs: number | null = null
+
+  let cursorMs = startMs + stepMs
+  while (cursorMs < stopMs + stepMs) {
+    const sampleMs = Math.min(cursorMs, stopMs)
+    const regime = eclipseRegimeAt(satrec, sampleMs)
+
+    if (regime === null) {
+      // Orbit decayed somewhere in (prevMs, sampleMs]. Bisect to locate the
+      // decay time so the final segment ends precisely there.
+      decayMs = findDecayTime(satrec, prevMs, sampleMs, maxIterations)
+      break
+    }
+
+    if (regime !== prevRegime) {
+      appendBoundaries(prevRegime, regime, prevMs, sampleMs)
+      prevRegime = regime
+    }
+
+    if (sampleMs === stopMs) {
+      break
+    }
+
+    prevMs = sampleMs
+    cursorMs += stepMs
+  }
+
+  // <----------------------------------------------------------------------->
+  // ASSEMBLE EVENTS
+  //
+  // Convert the ordered segments into contiguous events with overlapping
+  // timestamps (each event's stop is the next event's start). The window is
+  // fully tiled: the last event ends at stopMs, or at the decay time if the
+  // orbit decayed within the window.
+  // <----------------------------------------------------------------------->
+
+  const finalMs = decayMs ?? stopMs
+
+  const events: SatelliteSunEvent[] = []
+  for (let i = 0; i < segments.length; i++) {
+    const segmentStartMs = segments[i].startMs
+    const segmentStopMs = i + 1 < segments.length ? segments[i + 1].startMs : finalMs
+
+    // Skip zero (or inverted) length segments that can arise if a refined
+    // boundary coincides with the window edge or a neighbouring boundary.
+    if (segmentStopMs <= segmentStartMs) {
+      continue
+    }
+
+    events.push({
+      eventType: segments[i].regime,
+      start: formatTimestamp(DateTime.fromMillis(segmentStartMs, { zone: "utc" }), options.timestampFormat!),
+      stop: formatTimestamp(DateTime.fromMillis(segmentStopMs, { zone: "utc" }), options.timestampFormat!),
+      duration: (segmentStopMs - segmentStartMs) / 1000,
+    })
+  }
+
+  return events
+}
+
 // <--------------------------------------------------------------------------->
 
 // Re-export the public interfaces so consumers can import them from the module root
@@ -446,10 +678,12 @@ export type {
   Orbit,
   Position,
   SatelliteObservation,
+  SatelliteSunEvent,
   SatelliteTransit,
   TransitEvent,
   Velocity,
   SatelliteObservationOptions,
+  SatelliteSunEventOptions,
   SatelliteTransitOptions
 } from "./interfaces"
 
@@ -464,6 +698,7 @@ export type {
 
 export {
   AngularUnits,
+  SatelliteSunEventType,
   TimestampFormat,
 } from "./enums"
 

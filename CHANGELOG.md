@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0]
+
+### Added
+- New `satelliteSunEvents()` function that calculates the satellite's sunlight regime intervals (`SUNLIT`, `TRANSITION`, `ECLIPSE`) over a time range, returning contiguous `SatelliteSunEvent` records with overlapping timestamps that tile the entire window (or end at the orbit decay time). Regime boundaries are located with Brent's method on the angular-separation offset used by the eclipse-factor geometry
+- New `SatelliteSunEventType` enum (`SUNLIT`, `TRANSITION`, `ECLIPSE`) and `SatelliteSunEventOptions` for tuning the angular convergence tolerance, timestamp output format, max iterations, and optional coarse-step override
+- Transit events (`aos`, `los`, `tca`, and `peak`) from `satelliteTransits()` now include the satellite `position` (ECI/ECEF/geodetic) and `velocity` (ECI/ECEF) vectors at each event epoch
+- Transit events now include `sunlit` state and `eclipseFactor`, indicating whether the satellite is illuminated by the Sun and the fraction of the Sun's disc obscured by the Earth as seen from the satellite
+
+### Changed
+- `satelliteTransits()` now refines AOS, LOS, peak (culmination), horizon, and TCA events using Brent's method instead of the secant method, improving convergence robustness while preserving the existing tolerance and iteration options
+- `SatelliteTransitOptions` now declares the `timestampFormat` option that transit output already honored
+
 ## [2.0.0]
 
 ### Added
@@ -41,5 +53,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the legacy `bower.json`, `package.js` (Meteor), and `export.js` files
 
 
-## [1.2.0] - 2026-08-06
+## [1.2.0]
 - Deprecated legacy version (no longer supported)

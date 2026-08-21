@@ -3,7 +3,7 @@ import { Position, SatelliteObservation, SatelliteObservationOptions, TransitEve
 import { WGS84, astronomicalUnit, day2ms, defaultSatelliteObservationOptions, geostationaryMeanMotion, geostationaryTolerance, rad2deg } from "./constants.ts";
 import type { Seconds, Timestamp } from "./types.ts";
 import { TwoLineElement, OrbitMeanElementsMessage } from "./types.ts";
-import { AngularUnits, TimestampFormat } from "./enums.ts";
+import { AngularUnits, SatelliteSunEventType, TimestampFormat } from "./enums.ts";
 import {
   ecfToLookAngles,
   gstime,
@@ -25,6 +25,7 @@ import {
   MeanElements,
   shadowFraction,
   sunPos,
+  constants as satelliteConstants,
   Kilometer,
   KilometerPerSecond,
   EcfVec3,
@@ -654,10 +655,14 @@ export function buildTransitEvent(
 ): TransitEvent {
   return {
     epoch: observation.epoch!,
+    position: observation.position!,
+    velocity: observation.velocity!,
     elevation: observation.elevation!,
     azimuth: observation.azimuth!,
     slantRange: observation.slantRange!,
-    dopplerFactor: observation.dopplerFactor!
+    dopplerFactor: observation.dopplerFactor!,
+    sunlit: observation.sunlit!,
+    eclipseFactor: observation.eclipseFactor!
   }
 }
 
@@ -768,6 +773,148 @@ export function elevationRelativeTo(
   referenceElevation: Radians,
 ): Radians {
   return elevationAt(satrec, observerGeodeticRadians, epochMs) - referenceElevation
+}
+
+/**
+ * The Sun's radius in kilometers, matching the value used internally by
+ * satellite.js's `shadowFraction`. It is not exported by the library, so it is
+ * reproduced here to keep the eclipse-boundary geometry consistent with the
+ * `eclipseFactor` reported elsewhere.
+ */
+const sunRadiusKm = 695700
+
+/** Which eclipse-boundary a caller wants to locate. */
+export enum EclipseBoundary {
+  /** Sunlit <-> transition (penumbra) boundary: full sunlight begins/ends. */
+  Outer = 'OUTER',
+  /** Transition (penumbra) <-> eclipse (umbra) boundary: total shadow begins/ends. */
+  Inner = 'INNER',
+}
+
+/**
+ * Evaluate the signed angular-separation offset that defines an eclipse
+ * boundary at a given instant, reusing the exact geometry of satellite.js's
+ * `shadowFraction`.
+ *
+ * As seen from the satellite, `d` is the angular separation between the centres
+ * of the Earth and the (anti-solar) shadow axis, `rE` is the Earth's angular
+ * radius and `rS` the Sun's angular radius. `shadowFraction` transitions between
+ * regimes exactly at:
+ *
+ *   - `d == rE + rS`  → the sunlit <-> transition (penumbra) boundary (Outer)
+ *   - `d == rE - rS`  → the transition <-> eclipse (umbra) boundary  (Inner)
+ *
+ * This function returns:
+ *
+ *   - Outer: `d - (rE + rS)`  (positive when fully sunlit, negative in penumbra)
+ *   - Inner: `d - (rE - rS)`  (positive in penumbra, negative in full umbra)
+ *
+ * Both are smooth, monotonic-through-zero functions of time near their crossing,
+ * so a bracketed root finder (Brent) resolves the boundary cleanly — unlike the
+ * `eclipseFactor` itself, which is flat (exactly 0 or 1) outside the penumbra.
+ *
+ * When the satellite is on the Sun side of the Earth the shadow axis is behind
+ * it and no eclipse is geometrically possible; `shadowFraction` returns 0 in
+ * that case. To keep the offset well-signed (firmly "fully sunlit") the function
+ * returns a large positive value there.
+ *
+ * If SGP4 cannot produce a position (e.g. the orbit has decayed) the value is
+ * `NaN`, which callers detect to terminate the scan at the decay time.
+ *
+ * @param satrec the initialized SGP4 record for the satellite
+ * @param epochMs the instant at which to evaluate, in epoch milliseconds
+ * @param boundary which boundary (Outer or Inner) to measure against
+ * @returns the signed angular offset in radians, or `NaN` if decayed
+ */
+export function eclipseBoundaryValueAt(
+  satrec: SatRec,
+  epochMs: number,
+  boundary: EclipseBoundary,
+): number {
+  const date = new Date(epochMs)
+  const propagation = propagate(satrec, date)
+
+  // Decayed / unpropagatable: signal to the caller with NaN.
+  if (propagation === null) {
+    return Number.NaN
+  }
+
+  const satEci = propagation.position
+
+  // Sun position in kilometers (ECI), matching computeSatelliteObservation.
+  const sunEciAU = sunPos(jday(date)).rsun
+  const sunEciKm = {
+    x: sunEciAU.x * astronomicalUnit,
+    y: sunEciAU.y * astronomicalUnit,
+    z: sunEciAU.z * astronomicalUnit,
+  }
+
+  // Antisolar direction (unit vector pointing away from the Sun).
+  const sunMagnitude = vectorMagnitude(sunEciKm)
+  const antisolar = {
+    x: -sunEciKm.x / sunMagnitude,
+    y: -sunEciKm.y / sunMagnitude,
+    z: -sunEciKm.z / sunMagnitude,
+  }
+
+  const positionLength = vectorMagnitude(satEci)
+  const positionAndAntisolarDot =
+    satEci.x * antisolar.x + satEci.y * antisolar.y + satEci.z * antisolar.z
+
+  // Satellite is on the Sun side of the Earth: geometrically fully lit. Return a
+  // firmly positive offset so the boundary functions never spuriously bracket.
+  if (positionAndAntisolarDot <= 0) {
+    return Math.PI
+  }
+
+  const earthRadiusKm = satelliteConstants.earthRadius
+
+  // Angular radii of the Earth and Sun as seen from the satellite.
+  const rE = Math.asin(earthRadiusKm / positionLength)
+  const rS = Math.asin(sunRadiusKm / sunMagnitude)
+
+  // Angular separation between the Earth and shadow-axis centres.
+  const d = Math.acos(positionAndAntisolarDot / positionLength)
+
+  return boundary === EclipseBoundary.Outer ? d - (rE + rS) : d - (rE - rS)
+}
+
+/**
+ * Classify the satellite's sunlight regime at a given instant from the eclipse
+ * factor (`shadowFraction`):
+ *
+ *   - `eclipseFactor == 0`      → {@link SatelliteSunEventType.Sunlit}
+ *   - `0 < eclipseFactor < 1`   → {@link SatelliteSunEventType.Transition}
+ *   - `eclipseFactor == 1`      → {@link SatelliteSunEventType.Eclipse}
+ *
+ * Returns `null` when the satellite cannot be propagated (e.g. the orbit has
+ * decayed), which callers use to terminate the scan at the decay time.
+ *
+ * @param satrec the initialized SGP4 record for the satellite
+ * @param epochMs the instant at which to evaluate, in epoch milliseconds
+ * @returns the sun-event regime, or `null` if the orbit has decayed
+ */
+export function eclipseRegimeAt(
+  satrec: SatRec,
+  epochMs: number,
+): SatelliteSunEventType | null {
+  const date = new Date(epochMs)
+  const propagation = propagate(satrec, date)
+
+  if (propagation === null) {
+    return null
+  }
+
+  const sunEciAU = sunPos(jday(date)).rsun
+  const eclipseFactor = shadowFraction(sunEciAU, propagation.position)
+
+  if (eclipseFactor <= 0) {
+    return SatelliteSunEventType.Sunlit
+  }
+  if (eclipseFactor >= 1) {
+    return SatelliteSunEventType.Eclipse
+  }
+  return SatelliteSunEventType.Transition
 }
 
 /**
@@ -982,6 +1129,214 @@ export function secantExtremum(
 }
 
 /**
+ * Refine the time at which a scalar function of time crosses zero using Brent's
+ * method: a hybrid root finder that combines the guaranteed convergence of
+ * bisection with the fast (superlinear) convergence of the secant and inverse
+ * quadratic interpolation (IQI) methods.
+ *
+ * At each step Brent's method proposes an interpolated estimate — inverse
+ * quadratic interpolation when three distinct function values are available,
+ * otherwise a secant (linear) step — and accepts it only when it lands inside
+ * the current bracket and makes sufficient progress relative to the previous
+ * step (the classic Brent acceptance guards). When the interpolated step is
+ * rejected the method falls back to a bisection step, so the bracket is always
+ * at least halved over any two iterations and convergence is guaranteed. Unlike
+ * a plain secant method the interpolation can never send the estimate outside
+ * the bracket, so the search can never wander onto a neighbouring root.
+ *
+ * `f` is the target quantity offset from its crossing value — for example
+ * `elevation(t) - referenceElevation` for a rise/set/horizon event, or the
+ * angular-separation offset for an eclipse boundary — so the root is exactly the
+ * crossing time. All times are milliseconds since the Unix epoch, keeping the
+ * arithmetic in a single linear unit with no intermediate `DateTime` objects.
+ *
+ * The endpoints `aMs` and `bMs` MUST straddle the crossing (their `f` values
+ * must have opposite signs); every call site guarantees this by bracketing the
+ * event with a coarse sign change before refining.
+ *
+ * Convergence is judged on the *value* of `f`: iteration stops once
+ * `|f(t)| <= valueTolerance`, matching {@link secantMethod} so the same
+ * tolerance options carry the same meaning. If `maxIterations` is exhausted the
+ * best estimate found so far is returned.
+ *
+ * @param f the scalar function whose zero we are seeking, evaluated at epoch ms
+ * @param aMs one bracketing time, in epoch milliseconds
+ * @param bMs the other bracketing time, in epoch milliseconds
+ * @param valueTolerance convergence tolerance on `|f(t)|`, in the units of `f`
+ * @param maxIterations maximum number of iterations before giving up
+ * @returns the refined crossing time, in epoch milliseconds
+ */
+export function brentMethod(
+  f: (epochMs: number) => number,
+  aMs: number,
+  bMs: number,
+  valueTolerance: number,
+  maxIterations: number,
+): number {
+  // `a` and `b` bracket the root; `b` is kept as the best (smallest |f|)
+  // estimate. `c` is the previous contra-point (opposite sign to `b`).
+  let a = aMs
+  let b = bMs
+  let fa = f(a)
+  let fb = f(b)
+
+  // Either endpoint may already be within tolerance of the crossing.
+  if (Math.abs(fa) <= valueTolerance) {
+    return a
+  }
+  if (Math.abs(fb) <= valueTolerance) {
+    return b
+  }
+
+  // Ensure `b` is the endpoint with the smaller function magnitude.
+  if (Math.abs(fa) < Math.abs(fb)) {
+    ;[a, b] = [b, a]
+    ;[fa, fb] = [fb, fa]
+  }
+
+  let c = a
+  let fc = fa
+  // `d` holds the step from two iterations ago; `mflag` tracks whether the
+  // previous step was a bisection (used by Brent's progress guards).
+  let d = a
+  let mflag = true
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    let s: number
+
+    if (fa !== fc && fb !== fc) {
+      // Inverse quadratic interpolation through (a, fa), (b, fb), (c, fc).
+      s =
+        (a * fb * fc) / ((fa - fb) * (fa - fc)) +
+        (b * fa * fc) / ((fb - fa) * (fb - fc)) +
+        (c * fa * fb) / ((fc - fa) * (fc - fb))
+    } else {
+      // Secant step between the two best estimates.
+      s = b - fb * (b - a) / (fb - fa)
+    }
+
+    // Brent's acceptance conditions. Reject the interpolated step (and bisect
+    // instead) when it falls outside the permitted region, makes too little
+    // progress compared to the previous two steps, or is numerically unusable.
+    const lowerBound = (3 * a + b) / 4
+    const condition1 = !((s > Math.min(lowerBound, b) && s < Math.max(lowerBound, b)))
+    const condition2 = mflag && Math.abs(s - b) >= Math.abs(b - c) / 2
+    const condition3 = !mflag && Math.abs(s - b) >= Math.abs(c - d) / 2
+    const condition4 = mflag && Math.abs(b - c) < valueTolerance
+    const condition5 = !mflag && Math.abs(c - d) < valueTolerance
+
+    if (condition1 || condition2 || condition3 || condition4 || condition5) {
+      // Bisection fallback: guaranteed to stay in the bracket and converge.
+      s = (a + b) / 2
+      mflag = true
+    } else {
+      mflag = false
+    }
+
+    const fs = f(s)
+
+    // Converged once the target quantity is within tolerance of its crossing.
+    if (Math.abs(fs) <= valueTolerance) {
+      return s
+    }
+
+    // Shift the previous contra-point history forward.
+    d = c
+    c = b
+    fc = fb
+
+    // Tighten the bracket, preserving the opposite-sign invariant: replace
+    // whichever endpoint sits on the same side of the root as the new sample.
+    if ((fa < 0) !== (fs < 0)) {
+      b = s
+      fb = fs
+    } else {
+      a = s
+      fa = fs
+    }
+
+    // Keep `b` as the better estimate (smaller |f|) for the next iteration.
+    if (Math.abs(fa) < Math.abs(fb)) {
+      ;[a, b] = [b, a]
+      ;[fa, fb] = [fb, fa]
+    }
+  }
+
+  // Did not converge within the iteration budget; return the best estimate.
+  return b
+}
+
+/**
+ * Refine the time at which a scalar function of time reaches a local extremum
+ * (maximum or minimum) using {@link brentMethod} on the function's *rate*.
+ *
+ * An extremum occurs where the derivative `f'(t) = 0`, so Brent's method is
+ * applied to a finite-difference estimate of the rate to drive it toward zero.
+ * As with {@link secantExtremum}, the endpoints `aMs` and `bMs` MUST straddle
+ * the extremum (their rate values must have opposite signs); every call site
+ * guarantees this by locating the coarse interval where the rate flips sign
+ * before refining. Convergence is judged on the rate: iteration stops once
+ * `|rate(t)| <= rateTolerance`.
+ *
+ * Times are milliseconds since the Unix epoch, while the `rate` callback is
+ * expected to return the derivative in per-second units.
+ *
+ * @param rate a finite-difference estimate of d(value)/dt, evaluated at epoch ms
+ * @param aMs one bracketing time, in epoch milliseconds
+ * @param bMs the other bracketing time, in epoch milliseconds
+ * @param rateTolerance convergence tolerance on `|rate(t)|`, in the units of `rate`
+ * @param maxIterations maximum number of iterations before giving up
+ * @returns the refined extremum time, in epoch milliseconds
+ */
+export function brentExtremum(
+  rate: (epochMs: number) => number,
+  aMs: number,
+  bMs: number,
+  rateTolerance: number,
+  maxIterations: number,
+): number {
+  // An extremum of the value is a zero of its rate, so simply root the rate.
+  return brentMethod(rate, aMs, bMs, rateTolerance, maxIterations)
+}
+
+/**
+ * Locate the time at which the orbit decays (SGP4 can no longer produce a
+ * position) between a known-good time and a known-decayed time, by bisection.
+ *
+ * `goodMs` MUST propagate successfully and `decayedMs` MUST fail to propagate
+ * (as detected by the caller). The interval `[goodMs, decayedMs]` is halved
+ * `maxIterations` times, always keeping `goodMs` on the propagatable side, and
+ * the first decayed instant is returned. This lets a scan terminate an event
+ * precisely at re-entry rather than at the coarse sample that first detected it.
+ *
+ * @param satrec the initialized SGP4 record for the satellite
+ * @param goodMs a time that propagates successfully, in epoch milliseconds
+ * @param decayedMs a time that fails to propagate, in epoch milliseconds
+ * @param maxIterations number of bisection steps to perform
+ * @returns the approximate decay time, in epoch milliseconds
+ */
+export function findDecayTime(
+  satrec: SatRec,
+  goodMs: number,
+  decayedMs: number,
+  maxIterations: number,
+): number {
+  let good = goodMs
+  let decayed = decayedMs
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const midMs = (good + decayed) / 2
+    if (propagate(satrec, new Date(midMs)) === null) {
+      decayed = midMs
+    } else {
+      good = midMs
+    }
+  }
+
+  return decayed
+}
+
+/**
  * Locate the horizon (0-radian elevation) crossing for a single pass by
  * marching outward from a known event time (AOS or LOS) until the elevation
  * drops below the horizon, then refining the crossing with the secant method.
@@ -1027,7 +1382,7 @@ export function findHorizonCrossing(
     if (elevationOuter < 0) {
       // Bracket the crossing between the peak (above horizon) and this
       // below-horizon point, then refine.
-      return secantMethod(
+      return brentMethod(
         (ms) => elevationRelativeTo(satrec, observerGeodeticRadians, ms, 0),
         peakMs,
         outerMs,
