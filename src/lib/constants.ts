@@ -59,6 +59,8 @@ export const defaultSatelliteObservationOptions: SatelliteObservationOptions = {
   azimuthAngularUnits: AngularUnits.Degrees,
   elevationAngularUnits: AngularUnits.Degrees,
   geodeticAngularUnits: AngularUnits.Degrees,
+  betaAngleAngularUnits: AngularUnits.Degrees,
+  orbitPhaseAngularUnits: AngularUnits.Degrees,
   timestampFormat: TimestampFormat.ISO8601
 }
 

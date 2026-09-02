@@ -29,18 +29,19 @@ JsPredict is published as an ES module and ships with TypeScript type
 definitions.
 
 ```ts
-import { satelliteObservation, satelliteTransits, satelliteSunEvents } from "@nsat/jspredict"
+import { satelliteObservation, satelliteTransits, satelliteSunEvents, sunPosition } from "@nsat/jspredict"
 ```
 
 ## Concepts
 
-JsPredict exposes three primary functions:
+JsPredict exposes four primary functions:
 
 | Function | Purpose |
 | --- | --- |
 | `satelliteObservation` | Compute the state of a satellite (position, velocity, orbit, sun geometry, and optional observer look angles) at one or more instants in time. |
 | `satelliteTransits` | Find every pass a satellite makes over a fixed ground location within a time window, including AOS, LOS, peak, and time of closest approach. |
 | `satelliteSunEvents` | Split a time window into contiguous intervals of the satellite's sunlight regime: sunlit, transition (penumbra), and eclipse (umbra). |
+| `sunPosition` | Calculate the Sun's position at one or more instants in time. |
 
 ### Satellite element sets
 
@@ -583,6 +584,82 @@ enum SatelliteSunEventType {
 - Emits a `console.warn` when the search window begins before the element set's
   epoch (propagating before the satellite element's epoch is not recommended).
 - Returns `[]` and warns if the satellite has already decayed at `startTime`.
+
+## `sunPosition`
+
+```ts
+sunPosition(
+  epoch,                    // Timestamp | Timestamp[]
+  geodeticAngularUnits?,    // AngularUnits (optional, default Degrees)
+): Position | Position[]
+```
+
+Calculates the Sun's position in ECI, ECEF, and geodetic coordinates at one or
+more instants in time. Does not require satellite elements — this is a pure
+solar position calculation.
+
+### Basic usage
+
+```ts
+import { sunPosition } from "@nsat/jspredict"
+
+const position = sunPosition("2026-08-07T00:30:49.879Z")
+
+console.log(position.geo)  // Sun's geodetic position (lat/lon/height)
+console.log(position.eci)  // Sun's ECI position vector
+console.log(position.ecef) // Sun's ECEF position vector
+```
+
+```console
+{ latitude: 16.464784495145903, longitude: 173.7550904347212, height: 151719469.10079265 }
+{ x: -106442754.67412671, y: 99203886.9904007, z: 43003034.578139946 }
+{ x: -144640775.61226285, y: 15827736.632366166, z: 43003034.578139946 }
+```
+
+### Multiple epochs
+
+```ts
+const positions = sunPosition([
+  "2026-08-07T00:30:49.879Z",
+  "2026-08-07T12:00:00.000Z",
+  "2026-08-08T00:30:49.879Z",
+])
+// positions is a Position[] with one entry per timestamp
+```
+
+### Angular units
+
+By default, geodetic coordinates (`latitude`/`longitude`) are returned in
+**degrees**. Use the optional second parameter to request **radians**:
+
+```ts
+import { AngularUnits } from "@nsat/jspredict"
+
+const positionRadians = sunPosition(
+  "2026-08-07T00:30:49.879Z",
+  AngularUnits.Radians
+)
+
+console.log(positionRadians.geo)
+```
+
+```console
+{ longitude: 3.0325984201863907, latitude: 0.2873647000716083, height: 151719469.10079265 }
+```
+
+### Result Schema
+
+The returned `Position` object contains:
+
+| Field | Description |
+| --- | --- |
+| `eci` | Sun's position in Earth-Centered Inertial (TEME) coordinates `{ x, y, z }` (kilometers). |
+| `ecef` | Sun's position in Earth-Centered Earth-Fixed coordinates `{ x, y, z }` (kilometers). |
+| `geo` | Sun's geodetic position `{ latitude, longitude, height }` where `latitude`/`longitude` are in degrees (or radians if specified) and `height` is in kilometers. |
+
+Note: The `height` value represents the distance from the center of the Earth to
+the Sun along the surface normal at the subsolar point, approximately 1 AU
+(~150 million km).
 
 ## Configuration options
 

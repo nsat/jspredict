@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0]
+
+### Added
+- New `sunPosition()` function that calculates the Sun's position (ECI, ECEF, and geodetic coordinates) at one or more timestamps. Accepts either a single timestamp or an array of timestamps and returns corresponding `Position` object(s). The optional `geodeticAngularUnits` parameter (default: `Degrees`) controls whether geodetic coordinates are returned in degrees or radians.
+
+### Fixed
+- Fixed a bug where `betaAngle` and `orbit.phase` were defaulting to radians instead of degrees when `satelliteObservation()` was called without explicit `SatelliteObservationOptions`. The default options now correctly specify `orbitPhaseAngularUnits: AngularUnits.Degrees` and `betaAngleAngularUnits: AngularUnits.Degrees` to match the documented defaults.
+
 ## [2.1.0]
 
 ### Added

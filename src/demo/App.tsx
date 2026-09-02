@@ -469,25 +469,9 @@ export default function App() {
   const [duration, setDuration] = useState("1")
   const [timezone, setTimezone] = useState<TimeZoneMode>("local")
 
-  // Absolute start instant (UTC ms). Defaults to the element-set epoch until the
-  // user edits it manually.
+  // Absolute start instant (UTC ms). Defaults to the current time.
   const [startMs, setStartMs] = useState<number>(() => Date.now())
   const startEditedRef = useRef(false)
-
-  // Keep the start time defaulted to the parsed element-set epoch, unless the
-  // user has manually changed the picker.
-  useEffect(() => {
-    if (startEditedRef.current) return
-    try {
-      const { epoch } = parseElementSet(elements)
-      if (epoch) {
-        const ms = new Date(epoch).getTime()
-        if (!Number.isNaN(ms)) setStartMs(ms)
-      }
-    } catch {
-      // Ignore parse errors here; compute() surfaces them.
-    }
-  }, [elements])
 
   const [status, setStatus] = useState<Status>(null)
   const [fileStatus, setFileStatus] = useState<Status>(null)

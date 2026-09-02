@@ -1,6 +1,6 @@
 {
   "name": "@nsat/jspredict",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Javascript port of predict open-source satellite tracking library",
   "type": "module",
   "module": "./dist/jspredict.js",
