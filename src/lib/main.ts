@@ -62,11 +62,17 @@ import {
   eclipseBoundaryValueAt,
   eclipseRegimeAt,
   EclipseBoundary,
+  inferPosition,
+  convertGeodeticToDegrees,
 } from "./utils"
 import {
   Degrees,
   Radians,
+  gstime,
+  jday,
+  sunPos,
 } from "satellite.js"
+import { astronomicalUnit } from "./constants"
 
 /**
  * Calculates satellite observation parameters such as postion, velocity, and
@@ -443,6 +449,53 @@ export function satelliteTransits(
   }
 
   return transits
+}
+
+/**
+ * Calculates the Sun's position at one or more timestamps.
+ * @param epoch: accepts either a single timestamp or array of timestamps 
+ *    expressed as either a Unix timestamp, an ISO8601 string, a standard 
+ *    Javascript Date object, or luxon DateTime object
+ * @param geodeticAngularUnits: (optional) configure if angular units for geodetic 
+ *    coordinates are defined in Degrees or Radians, default is Degrees
+ * Returns either a single Position or array of Positions if an array of epochs 
+ *    is provided
+ */
+export function sunPosition(
+  epoch: Timestamp | Timestamp[],
+  geodeticAngularUnits: AngularUnits = AngularUnits.Degrees
+): Position | Position[] {
+  if (Array.isArray(epoch)) {
+    return epoch.map((e) => {
+      const datetime = parseTimestamp(e)
+      const gmst = gstime(jday(datetime.toJSDate()))
+      
+      // Calculate the sun's position in kilometers
+      const sunEciAU = sunPos(jday(datetime.toJSDate())).rsun
+      const sunEci = {
+        x: sunEciAU.x * astronomicalUnit,
+        y: sunEciAU.y * astronomicalUnit,
+        z: sunEciAU.z * astronomicalUnit,
+      }
+      
+      const position = inferPosition({ eci: sunEci }, gmst, geodeticAngularUnits)
+      return geodeticAngularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(position) : position
+    })
+  } else {
+    const datetime = parseTimestamp(epoch)
+    const gmst = gstime(jday(datetime.toJSDate()))
+    
+    // Calculate the sun's position in kilometers
+    const sunEciAU = sunPos(jday(datetime.toJSDate())).rsun
+    const sunEci = {
+      x: sunEciAU.x * astronomicalUnit,
+      y: sunEciAU.y * astronomicalUnit,
+      z: sunEciAU.z * astronomicalUnit,
+    }
+    
+    const position = inferPosition({ eci: sunEci }, gmst, geodeticAngularUnits)
+    return geodeticAngularUnits === AngularUnits.Degrees ? convertGeodeticToDegrees(position) : position
+  }
 }
 
 /**
