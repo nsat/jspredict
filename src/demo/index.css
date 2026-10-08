@@ -32,6 +32,8 @@
   --border: #e2e2e2;
   --input: #e2e2e2;
   --ring: #be0000;
+  --chart-grid: oklch(0 0 0 / 15%);
+  --chart-text: var(--muted-foreground);
 }
 
 .dark {
@@ -53,6 +55,8 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 18%);
   --ring: #be0000;
+  --chart-grid: oklch(1 0 0 / 24%);
+  --chart-text: var(--muted-foreground);
 }
 
 @theme inline {
