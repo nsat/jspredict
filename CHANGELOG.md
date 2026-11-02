@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1]
+
+### Changed
+- Updated development dependencies (no changes to runtime dependencies):
+  - `@microsoft/api-extractor` 7.58.12 → 7.60.1
+  - `@radix-ui/react-label` 2.1.15 → 2.1.17
+  - `@radix-ui/react-popover` 1.1.23 → 1.3.1
+  - `@radix-ui/react-select` 2.3.7 → 2.4.1
+  - `@radix-ui/react-tabs` 1.1.21 → 1.2.1
+  - `@types/luxon` 3.7.4 → 3.7.6
+  - `@types/react` 19.2.18 → 19.3.0
+  - `@types/react-dom` 19.2.4 → 19.3.0
+  - `@vitejs/plugin-react` 6.0.5 → 6.2.1
+  - `chart.js` 4.5.1 → 4.6.1
+  - `eslint` 10.8.0 → 10.14.0
+  - `lucide-react` 1.32.0 → 1.66.0
+  - `react` and `react-dom` 19.2.8 → 19.3.1
+  - `react-day-picker` 10.0.1 → 10.0.2
+  - `tailwind-merge` 3.6.0 → 3.7.0
+  - `tsx` 4.23.12 → 4.23.15
+  - `vite` 8.2.1 → 8.3.5
+  - `vite-plugin-dts` 5.0.3 → 5.1.2
+  - `vite-plugin-singlefile` 2.3.3 → 2.3.4
+  - `vitest` 4.1.10 → 4.1.12
+
 ## [2.2.0]
 
 ### Added
